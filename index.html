@@ -1,0 +1,1319 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>NOVA ANALOG ENGINE V6.5 ELITE</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        :root {
+            --bg: #030408; 
+            --surface: rgba(13, 17, 28, 0.7); 
+            --surface2: rgba(30, 41, 59, 0.4); 
+            --border: rgba(255, 255, 255, 0.08);
+            --accent: #06b6d4; 
+            --accent-glow: rgba(6, 182, 212, 0.3);
+            --accent2: #818cf8; 
+            --text: #f1f5f9; 
+            --text-muted: #94a3b8;
+            --warning: #f59e0b; 
+            --danger: #ef4444;
+            --radius: 24px; 
+            --radius-sm: 12px;
+            --font: 'Outfit', 'Inter', sans-serif;
+            --mono: 'JetBrains Mono', monospace;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body { 
+            background: var(--bg); 
+            background-image: 
+                radial-gradient(circle at 10% 10%, rgba(129, 140, 248, 0.06) 0%, transparent 40%),
+                radial-gradient(circle at 90% 90%, rgba(6, 182, 212, 0.06) 0%, transparent 40%);
+            color: var(--text); 
+            font-family: var(--font); 
+            min-height: 100vh; 
+            padding: 40px 20px 80px; 
+            overflow-x: hidden;
+        }
+
+        .container { position: relative; z-index: 1; width: 100%; max-width: 720px; margin: 0 auto; }
+        
+        .header-flex { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 48px; text-align: center; }
+        h1.title { 
+            font-size: 2.8rem; 
+            font-weight: 700; 
+            letter-spacing: -0.04em; 
+            background: linear-gradient(135deg, #fff 0%, #94a3b8 100%); 
+            -webkit-background-clip: text; 
+            -webkit-text-fill-color: transparent; 
+        }
+        h1.title span { color: var(--accent); -webkit-text-fill-color: var(--accent); }
+        
+        .badge { 
+            font-size: 0.65rem; 
+            padding: 4px 12px; 
+            background: rgba(255,255,255,0.03); 
+            color: var(--text-muted); 
+            border: 1px solid var(--border); 
+            border-radius: 100px; 
+            letter-spacing: 0.1em; 
+            font-weight: 700; 
+        }
+
+        .main-card { 
+            background: var(--surface); 
+            backdrop-filter: blur(24px); 
+            -webkit-backdrop-filter: blur(24px); 
+            border: 1px solid var(--border); 
+            border-radius: var(--radius); 
+            padding: 40px; 
+            box-shadow: 0 40px 80px rgba(0,0,0,0.5); 
+        }
+
+        .upload-area { 
+            border: 2px dashed var(--border); 
+            border-radius: var(--radius); 
+            padding: 56px 24px; 
+            text-align: center; 
+            cursor: pointer; 
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); 
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            background: rgba(255,255,255,0.02);
+        }
+        .upload-area:hover { 
+            border-color: var(--accent); 
+            background: rgba(6, 182, 212, 0.05);
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+        }
+        .upload-area .icon-container {
+            width: 80px;
+            height: 80px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 24px;
+            transition: 0.5s;
+        }
+        .upload-area:hover .icon-container {
+            transform: translateY(-5px) rotate(10deg);
+            border-color: var(--accent);
+            box-shadow: 0 0 20px var(--accent-glow);
+        }
+        .upload-area svg { width: 32px; height: 32px; fill: var(--accent); }
+        
+        #file-name-display { font-size: 1.2rem; font-weight: 700; color: #fff; letter-spacing: -0.03em; }
+        .upload-hint { font-size: 0.85rem; color: var(--text-muted); font-weight: 400; }
+
+        .preset-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; margin-top: 24px; }
+        #quality-preset { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); padding: 12px 16px; font-size: 0.9rem; outline: none; transition: 0.2s; }
+        #quality-preset:hover { border-color: rgba(255,255,255,0.15); }
+
+        .options-grid { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; }
+        .toggle-container { display: flex; align-items: center; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 18px; transition: 0.2s; position: relative; }
+        .toggle-container.warning-bg { background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.3); }
+        .toggle-container.danger-bg { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.4); }
+        .drag-handle { color: var(--text-muted); font-size: 1.25rem; cursor: grab; padding-right: 12px; }
+        .toggle-container > span { font-size: 0.9rem; flex: 1; text-align: left; color: var(--text); font-weight: 500; }
+        
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider.round { position: absolute; inset: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 24px; cursor: pointer; transition: 0.3s; }
+        .slider.round::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3.5px; top: 3px; background: #fff; border-radius: 50%; transition: 0.3s; }
+        .switch input:checked + .slider { background: var(--accent); border-color: var(--accent); }
+        .switch input:checked + .slider::before { transform: translateX(20px); }
+
+        input[type="range"] { -webkit-appearance: none; width: 100px; height: 4px; background: var(--bg); border-radius: 4px; margin-left: 16px; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); cursor: pointer; border: 2px solid #fff; box-shadow: 0 0 10px var(--accent-glow); }
+
+        .primary-btn { width: 100%; padding: 18px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; font-size: 1rem; font-weight: 700; border: none; border-radius: var(--radius-sm); cursor: pointer; transition: 0.3s; box-shadow: 0 8px 24px rgba(6, 182, 212, 0.3); }
+        .primary-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(6, 182, 212, 0.4); }
+        .primary-btn:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+
+        .result-area { display: none; margin-top: 48px; width: 100%; }
+        .analysis-report { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; margin-bottom: 24px; }
+        .metric { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+        .metric:last-child { border-bottom: none; }
+        .metric .value { font-family: var(--mono); color: var(--accent); font-weight: 600; }
+
+        .visualization-container { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 20px; margin-bottom: 16px; width: 100%; }
+        .wf-label { display: flex; justify-content: space-between; font-size: 0.75rem; font-weight: 700; color: var(--text-muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.1em; }
+        #waveform-original, #waveform-restored { background: rgba(0,0,0,0.3); border-radius: 12px; height: 72px; cursor: pointer; margin-bottom: 16px; }
+        
+        .audio-player { 
+            width: 100% !important; 
+            height: 36px; 
+            margin-top: 12px; 
+            display: block; 
+            filter: invert(0.9) hue-rotate(180deg) brightness(1.5);
+            opacity: 0.8;
+            transition: 0.3s;
+        }
+        .audio-player:hover { opacity: 1; }
+        
+        .master-controls { display: flex; align-items: center; justify-content: center; gap: 32px; margin: 48px 0; }
+        .master-play-btn { width: 64px; height: 64px; border-radius: 50%; background: var(--accent); border: none; color: white; font-size: 1.5rem; cursor: pointer; transition: 0.3s; box-shadow: 0 0 24px var(--accent-glow); }
+        .master-play-btn:hover { transform: scale(1.1); box-shadow: 0 0 32px var(--accent-glow); }
+        
+        .ab-toggle-btn { background: var(--surface); border: 1px solid var(--border); border-radius: 100px; padding: 6px 16px; display: flex; align-items: center; cursor: pointer; transition: 0.3s; }
+        .ab-toggle-btn:hover { border-color: var(--accent); }
+        .toggle-switch { width: 44px; height: 24px; background: var(--bg); border-radius: 20px; position: relative; margin: 0 16px; }
+        .toggle-switch::after { content: ''; position: absolute; width: 18px; height: 18px; background: white; border-radius: 50%; top: 3px; left: 3px; transition: 0.3s; }
+        .ab-toggle-btn.restored .toggle-switch { background: var(--accent); }
+        .ab-toggle-btn.restored .toggle-switch::after { transform: translateX(20px); }
+        .mode-label { font-size: 0.75rem; color: var(--text-muted); font-weight: 800; letter-spacing: 0.05em; transition: 0.3s; }
+        .mode-label.active { color: white; opacity: 1; }
+
+        .apply-ai-btn { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); padding: 10px 20px; border-radius: 100px; font-size: 0.75rem; font-weight: 700; cursor: not-allowed; transition: 0.3s; }
+        .apply-ai-btn.ready { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; border: none; cursor: pointer; box-shadow: 0 4px 16px var(--accent-glow); }
+
+        .batch-container { margin-top: 40px; }
+        .batch-list { display: flex; flex-direction: column; gap: 8px; list-style: none; padding: 0; }
+        .batch-item { 
+            background: rgba(255,255,255,0.02); 
+            border: 1px solid var(--border); 
+            padding: 14px 20px; 
+            border-radius: var(--radius-sm); 
+            cursor: pointer; 
+            font-size: 0.85rem; 
+            color: var(--text-muted); 
+            display: flex; 
+            align-items: center; 
+            justify-content: space-between; 
+            transition: 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .batch-item::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; bottom: 0; width: 4px;
+            background: var(--accent);
+            transform: translateX(-100%);
+            transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .batch-item:hover { background: rgba(255,255,255,0.05); color: #fff; border-color: rgba(255,255,255,0.15); }
+        .batch-item.active { 
+            background: rgba(6, 182, 212, 0.08); 
+            border-color: var(--accent); 
+            color: #fff; 
+            font-weight: 600;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        }
+        .batch-item.active::before { transform: translateX(0); }
+        .batch-item .file-size { font-family: var(--mono); font-size: 0.7rem; opacity: 0.5; }
+        
+        .warn-tag { 
+            display: inline-block;
+            font-size: 0.6rem; 
+            font-weight: 800; 
+            color: #fff; 
+            background: var(--danger);
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 8px;
+            opacity: 0; 
+            transform: scale(0.8);
+            transition: 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); 
+            vertical-align: middle;
+            letter-spacing: 0;
+        }
+        .warning-bg .warn-tag { opacity: 0.8; transform: scale(1); background: var(--warning); }
+        .danger-bg .warn-tag { opacity: 1; transform: scale(1); background: var(--danger); box-shadow: 0 0 10px rgba(239,68,68,0.4); }
+
+        .download-btn { display: block; text-align: center; padding: 20px; background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.2); border-radius: var(--radius-sm); color: var(--accent); text-decoration: none; font-weight: 700; font-size: 1rem; transition: 0.3s; }
+        .download-btn:hover { background: rgba(6, 182, 212, 0.2); transform: translateY(-2px); border-color: var(--accent); }
+
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 1000; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(8px); }
+        .modal-content { background: var(--surface); border-radius: var(--radius); padding: 32px; width: 100%; max-width: 440px; border: 1px solid var(--border); box-shadow: 0 32px 64px rgba(0,0,0,0.6); }
+        #groq-api-key { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; color: white; font-family: var(--mono); margin: 20px 0; outline: none; }
+        #groq-api-key:focus { border-color: var(--accent); }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header class="header-flex">
+        <h1 class="title">NOVA <span>ANALOG</span></h1>
+        <div style="display:flex; align-items:center; gap:12px;">
+            <div class="badge">V6.5 ELITE ENGINE</div>
+            <button type="button" id="settings-btn" style="background:rgba(255,255,255,0.05); border:1px solid var(--border); color:var(--text-muted); width:32px; height:32px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:0.3s; font-size:1rem;">⚙️</button>
+        </div>
+        <div id="ai-status-indicator" style="font-size:0.65rem; color:var(--text-muted); margin-top:8px; letter-spacing:0.05em; font-weight:600;">AI MASTERING: <span style="color:var(--accent);">ACTIVE</span></div>
+    </header>
+
+    <form id="upload-form" class="main-card" style="background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:40px; box-shadow:0 32px 64px rgba(0,0,0,0.5);">
+        <label class="upload-area" id="drop-zone" for="audio-file" style="border:2px dashed var(--border); background:rgba(255,255,255,0.02); padding:64px 24px;">
+            <input type="file" id="audio-file" accept="audio/*" multiple style="display:none;">
+            <div class="icon-container" style="width:80px; height:80px; background:var(--surface2); border:1px solid var(--border); border-radius:24px; display:flex; align-items:center; justify-content:center; margin-bottom:24px; transition:0.5s;">
+                <svg viewBox="0 0 24 24" style="width:32px; height:32px; fill:var(--accent);"><path d="M12 3v13m0-13l-4 4m4-4l4 4m-8 9h8c1.1 0 2-.9 2-2v-2H6v2c0 1.1.9 2 2 2z" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"/></svg>
+            </div>
+            <div id="file-name-display" style="font-size:1.2rem; font-weight:700; color:#fff; letter-spacing:-0.03em;">NOVA CORE IS READY</div>
+            <div class="upload-hint">DRAG & DROP AUDIO TO START THE PROCESS</div>
+        </label>
+
+        <div class="preset-row" style="margin-top:16px;">
+            <label style="font-size:0.85rem;color:var(--text-muted);font-weight:700;">PRESET <span class="offline-badge">Pure-Match Active</span></label>
+            <select id="quality-preset">
+                <option value="music_balanced" selected>음악 밸런스 (표준)</option>
+                <option value="voice_clean">깨끗한 음성 (보컬용)</option>
+                <option value="podcast_pro">팟캐스트 프로 (방송급)</option>
+                <option value="compressed_repair">압축 음원 복구 (저음질용)</option>
+                <option value="asmr_field">ASMR / 현장 녹음 (초고해상도)</option>
+            </select>
+        </div>
+
+        <div class="options-grid" id="dsp-chain">
+            <!-- [FIX #10] val-highpass max="150" 으로 확장 (프리셋 120 수용) -->
+            <div class="toggle-container" data-module="highpass">
+                <span class="drag-handle">☰</span>
+                <span>저역 제거 (Low Cut)</span>
+                <div class="control-group">
+                    <label class="switch"><input type="checkbox" id="opt-highpass" checked><span class="slider round"></span></label>
+                    <input type="range" id="val-highpass" min="0" max="150" value="75">
+                </div>
+            </div>
+            <div class="toggle-container" data-module="multiband">
+                <span class="drag-handle">☰</span>
+                <span>멀티밴드 글루 (Multiband Glue)<span class="warn-tag">⚠️ 왜곡 주의</span></span>
+                <div class="control-group">
+                    <label class="switch"><input type="checkbox" id="opt-multiband" checked><span class="slider round"></span></label>
+                    <input type="range" id="val-multiband" min="0" max="100" value="55">
+                </div>
+            </div>
+            <div class="toggle-container" data-module="punchy_bass">
+                <span class="drag-handle">☰</span>
+                <span>저음 강화 (Punchy Bass)<span class="warn-tag">⚠️ 왜곡 주의</span></span>
+                <div class="control-group">
+                    <label class="switch"><input type="checkbox" id="opt-punchy-bass" checked><span class="slider round"></span></label>
+                    <input type="range" id="val-punchy-bass" min="0" max="100" value="30">
+                </div>
+            </div>
+            <div class="toggle-container" data-module="super_res">
+                <span class="drag-handle">☰</span>
+                <span>고주파 복원 (Super Resolution)<span class="warn-tag">⚠️ 왜곡 주의</span></span>
+                <div class="control-group">
+                    <label class="switch"><input type="checkbox" id="opt-super-res" checked><span class="slider round"></span></label>
+                    <input type="range" id="val-super-res" min="0" max="100" value="50">
+                </div>
+            </div>
+            <div class="toggle-container" data-module="brilliance">
+                <span class="drag-handle">☰</span>
+                <span>배음 강화 (Brilliance)<span class="warn-tag">⚠️ 왜곡 주의</span></span>
+                <div class="control-group">
+                    <label class="switch"><input type="checkbox" id="opt-brilliance" checked><span class="slider round"></span></label>
+                    <input type="range" id="val-brilliance" min="0" max="100" value="45">
+                </div>
+            </div>
+            <div class="toggle-container" data-module="stereo">
+                <span class="drag-handle">☰</span>
+                <span>공간 확장 (Stereo Widener)<span class="warn-tag">⚠️ 왜곡 주의</span></span>
+                <div class="control-group">
+                    <label class="switch"><input type="checkbox" id="opt-stereo" checked><span class="slider round"></span></label>
+                    <input type="range" id="val-stereo" min="0" max="100" value="60">
+                </div>
+            </div>
+            <div class="toggle-container" data-module="limiter">
+                <span class="drag-handle">☰</span>
+                <span>최종 출력 (Limiter)<span class="warn-tag">⚠️ 왜곡 주의</span></span>
+                <div class="control-group">
+                    <label class="switch"><input type="checkbox" id="opt-limiter" checked><span class="slider round"></span></label>
+                    <input type="range" id="val-limiter" min="0" max="100" value="50">
+                </div>
+            </div>
+            <div class="toggle-container" style="cursor:default;" data-module="match_volume">
+                <span style="width:34px;"></span>
+                <span>원본 볼륨 맞춤 (Match Volume)</span>
+                <div class="control-group">
+                    <label class="switch"><input type="checkbox" id="opt-match-volume" checked><span class="slider round"></span></label>
+                </div>
+            </div>
+        </div>
+
+        <button type="submit" id="submit-btn" class="primary-btn" disabled>고품질 마스터링 시작</button>
+    </form>
+
+    <div class="loader-container" id="loader">
+        <div class="loader"></div>
+        <div id="status-text" style="font-weight:700; color:var(--accent); letter-spacing:0.1em; font-size:0.8rem;">NOVA ENGINE PROCESSING...</div>
+    </div>
+
+    <div class="result-area" id="result-area">
+        <div id="ai-report-area" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                <strong style="font-size:0.95rem;letter-spacing:0.02em;">🤖 AI MASTERING GUIDE</strong>
+                <span id="ai-status-dot" style="width:8px;height:8px;background:var(--accent);border-radius:50%;box-shadow:0 0 8px var(--accent);"></span>
+            </div>
+            <div id="ai-feedback-text" style="font-size:0.88rem;color:var(--text-muted);white-space:pre-line;line-height:1.7;">분석 결과를 기다리는 중...</div>
+            <div class="metrics-grid" style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:20px 0; padding:16px; background:rgba(255,255,255,0.03); border-radius:16px; border:1px solid var(--border);">
+                <div class="metric-item" style="text-align:center;">
+                    <div style="font-size:0.65rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-bottom:4px;">LUFS</div>
+                    <div id="metric-lufs" style="font-family:var(--mono); color:var(--accent); font-weight:700;">-24.0</div>
+                </div>
+                <div class="metric-item" style="text-align:center; border-left:1px solid var(--border); border-right:1px solid var(--border);">
+                    <div style="font-size:0.65rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-bottom:4px;">Crest</div>
+                    <div id="metric-crest" style="font-family:var(--mono); color:var(--accent2); font-weight:700;">12.0</div>
+                </div>
+                <div class="metric-item" style="text-align:center;">
+                    <div style="font-size:0.65rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-bottom:4px;">Phase</div>
+                    <div id="metric-phase" style="font-family:var(--mono); color:#fff; font-weight:700;">0.99</div>
+                </div>
+            </div>
+            <div id="ai-recommendation-box" class="ai-rec-box">
+                <div class="ai-rec-header">
+                    <span class="ai-rec-title">🎯 Smart Tuning</span>
+                    <button type="button" id="apply-ai-btn" class="apply-ai-btn">AI 대기 중</button>
+                </div>
+                <div id="ai-rec-list" style="color:var(--text-muted);font-size:0.85rem;">처리 완료 후 파라미터 추천이 시작됩니다.</div>
+            </div>
+        </div>
+
+        <div class="master-controls" style="display:flex; justify-content:center; align-items:center; gap:24px; margin-bottom:32px;">
+            <span class="time-display" id="time-current" style="font-family:var(--mono); color:var(--text-muted); font-size:0.8rem;">0:00</span>
+            <button type="button" id="master-play-btn" class="master-play-btn" style="width:56px; height:56px; border-radius:50%; background:var(--accent); color:white; border:none; font-size:1.2rem; cursor:pointer; box-shadow:0 0 20px var(--accent-glow); transition:0.3s;">▶</button>
+            <div id="ab-toggle-btn" class="ab-toggle-btn restored">
+                <span class="mode-label" id="mode-original">ORIGINAL</span>
+                <div class="toggle-switch"></div>
+                <span class="mode-label active" id="mode-restored">RESTORED</span>
+            </div>
+            <span class="time-display" id="time-total" style="font-family:var(--mono); color:var(--text-muted); font-size:0.8rem;">0:00</span>
+        </div>
+
+        <div class="visualization-container">
+            <div class="wf-label"><span>Original Waveform</span><span id="orig-status">READY</span></div>
+            <div id="waveform-original"></div>
+            <audio id="original-player" class="audio-player" controls></audio>
+        </div>
+        <div class="visualization-container">
+            <div class="wf-label"><span>Restored Waveform</span><span id="rest-status" style="color:var(--accent);">ACTIVE</span></div>
+            <div id="waveform-restored"></div>
+            <audio id="restored-player" class="audio-player" controls></audio>
+        </div>
+
+        <div class="batch-container" style="margin-top:24px; padding-top:24px; border-top:1px solid var(--border);">
+            <div style="font-size:0.7rem; color:var(--text-muted); font-weight:700; margin-bottom:12px; letter-spacing:0.05em;">PROCESSING HISTORY</div>
+            <ul class="batch-list" id="batch-list"></ul>
+        </div>
+
+        <a href="#" id="download-link" class="download-btn">📥 DOWNLOAD CURRENT MASTER</a>
+        <button type="button" id="zip-download-btn" class="download-btn" style="width:100%; background:rgba(129,140,248,0.1); border: 1px solid rgba(129,140,248,0.3); color:var(--accent2); display:none; margin-top:12px; font-weight:700;">📦 EXPORT ALL AS ZIP ARCHIVE</button>
+    </div>
+</div>
+
+<div id="settings-modal" class="modal">
+    <div class="modal-content">
+        <h2 style="font-size:1.2rem;margin-bottom:8px;">Groq AI Settings</h2>
+        <p style="font-size:0.8rem;color:var(--text-muted);">Optional: Enter your Groq API key for AI mastering recommendations</p>
+        <input type="password" id="groq-api-key" placeholder="gsk_...">
+        <div style="display:flex;gap:10px;margin-top:16px;">
+            <button type="button" id="modal-close" style="flex:1;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;">Cancel</button>
+            <button type="button" id="modal-save" style="flex:1;padding:10px;background:var(--accent);border:none;border-radius:10px;color:white;cursor:pointer;font-weight:700;">Save</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// CONSTANTS
+// ─────────────────────────────────────────────
+const PRESET_MAP = {
+    music_balanced: {
+        vals: { "opt-highpass": true, "val-highpass": 75, "opt-multiband": true, "val-multiband": 55, "opt-punchy-bass": true, "val-punchy-bass": 30, "opt-super-res": true, "val-super-res": 50, "opt-brilliance": true, "val-brilliance": 45, "opt-stereo": true, "val-stereo": 60, "opt-limiter": true, "val-limiter": 50, "opt-match-volume": true },
+        order: ["highpass","multiband","punchy_bass","super_res","brilliance","stereo","limiter"]
+    },
+    voice_clean: {
+        vals: { "opt-highpass": true, "val-highpass": 100, "opt-multiband": true, "val-multiband": 40, "opt-punchy-bass": false, "val-punchy-bass": 0, "opt-super-res": true, "val-super-res": 30, "opt-brilliance": false, "val-brilliance": 0, "opt-stereo": false, "val-stereo": 0, "opt-limiter": true, "val-limiter": 40, "opt-match-volume": true },
+        order: ["highpass","multiband","super_res","limiter"]
+    },
+    podcast_pro: {
+        vals: { "opt-highpass": true, "val-highpass": 120, "opt-multiband": true, "val-multiband": 50, "opt-punchy-bass": false, "val-punchy-bass": 0, "opt-super-res": true, "val-super-res": 40, "opt-brilliance": false, "val-brilliance": 0, "opt-stereo": false, "val-stereo": 0, "opt-limiter": true, "val-limiter": 45, "opt-match-volume": true },
+        order: ["highpass","multiband","super_res","limiter"]
+    },
+    compressed_repair: {
+        vals: { "opt-highpass": true, "val-highpass": 50, "opt-multiband": true, "val-multiband": 70, "opt-punchy-bass": true, "val-punchy-bass": 50, "opt-super-res": true, "val-super-res": 70, "opt-brilliance": true, "val-brilliance": 60, "opt-stereo": true, "val-stereo": 40, "opt-limiter": true, "val-limiter": 60, "opt-match-volume": true },
+        order: ["highpass","multiband","super_res","punchy_bass","brilliance","stereo","limiter"]
+    },
+    asmr_field: {
+        vals: { "opt-highpass": true, "val-highpass": 30, "opt-multiband": true, "val-multiband": 45, "opt-punchy-bass": false, "val-punchy-bass": 0, "opt-super-res": true, "val-super-res": 80, "opt-brilliance": true, "val-brilliance": 70, "opt-stereo": true, "val-stereo": 80, "opt-limiter": true, "val-limiter": 40, "opt-match-volume": true },
+        order: ["highpass","multiband","super_res","brilliance","stereo","limiter"]
+    }
+};
+
+const PROFILES = {
+    music_balanced:  { sr_gain: 2.5, br_gain: 3.0, pb_gain: 2.5, st_mul: 0.9, lim_mul: 0.92, warmth: 1.2 },
+    voice_clean:     { sr_gain: 1.2, br_gain: 0,   pb_gain: 0,   st_mul: 0.7, lim_mul: 0.85, warmth: 0.6 },
+    compressed_repair:{ sr_gain: 3.8, br_gain: 4.5, pb_gain: 4.0, st_mul: 0.8, lim_mul: 0.88, warmth: 1.8 },
+    podcast_pro:     { sr_gain: 1.8, br_gain: 0,   pb_gain: 0,   st_mul: 0.6, lim_mul: 0.82, warmth: 1.0 },
+    asmr_field:      { sr_gain: 4.2, br_gain: 4.2, pb_gain: 0,   st_mul: 1.1, lim_mul: 0.90, warmth: 0.8 }
+};
+
+const SAFETY_THRESHOLDS = {
+    multiband:  [75, 90],
+    punchy_bass:[55, 75],
+    super_res:  [65, 85],
+    brilliance: [75, 90],
+    stereo:     [80, 95],
+    limiter:    [85, 98]
+};
+
+// ─────────────────────────────────────────────
+// SAFETY UI
+// ─────────────────────────────────────────────
+function updateSafetyUI(rangeEl) {
+    if (!rangeEl) return;
+    const mod = rangeEl.id.replace('val-', '').replace(/-/g, '_');
+    const val = parseInt(rangeEl.value);
+    const container = rangeEl.closest('.toggle-container');
+    if (!container) return;
+    const thresholds = SAFETY_THRESHOLDS[mod];
+    if (thresholds) {
+        rangeEl.classList.remove('warn-slider', 'danger-slider');
+        container.classList.remove('warning-bg', 'danger-bg');
+        if (val >= thresholds[1]) {
+            rangeEl.classList.add('danger-slider');
+            container.classList.add('danger-bg');
+        } else if (val >= thresholds[0]) {
+            rangeEl.classList.add('warn-slider');
+            container.classList.add('warning-bg');
+        }
+    }
+}
+
+// ─────────────────────────────────────────────
+// PRESET APPLY
+// ─────────────────────────────────────────────
+function applyPreset(presetName) {
+    const p = PRESET_MAP[presetName];
+    if (!p) return;
+    
+    // 1. 값 적용 및 UI 업데이트
+    Object.entries(p.vals).forEach(([id, val]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.type === 'checkbox') {
+            el.checked = val;
+        } else {
+            el.value = val;
+        }
+        // 개별 요소의 Safety UI 즉시 갱신
+        if (id.startsWith('val-')) {
+            updateSafetyUI(el);
+        }
+    });
+
+    // 2. DOM 순서 재배치 (DSP 체인 순서)
+    const chain = document.getElementById('dsp-chain');
+    p.order.forEach(mod => {
+        const item = chain.querySelector(`[data-module="${mod}"]`);
+        if (item) chain.appendChild(item);
+    });
+    
+    // 3. 볼륨 매칭은 항상 마지막
+    const mv = chain.querySelector('[data-module="match_volume"]');
+    if (mv) chain.appendChild(mv);
+}
+
+// ─────────────────────────────────────────────
+// DRAG & DROP CHAIN REORDER
+// ─────────────────────────────────────────────
+const dspChain = document.getElementById('dsp-chain');
+let dragItem = null;
+
+dspChain.addEventListener('mousedown', e => {
+    const isHandle = e.target.classList.contains('drag-handle');
+    dspChain.querySelectorAll('.toggle-container').forEach(c => {
+        c.setAttribute('draggable', isHandle ? 'true' : 'false');
+    });
+});
+dspChain.addEventListener('dragstart', e => {
+    dragItem = e.target.closest('.toggle-container');
+    if (dragItem) dragItem.classList.add('dragging');
+});
+dspChain.addEventListener('dragend', () => {
+    if (dragItem) dragItem.classList.remove('dragging');
+    dragItem = null;
+});
+dspChain.addEventListener('dragover', e => {
+    e.preventDefault();
+    if (!dragItem) return;
+    const siblings = [...dspChain.querySelectorAll('.toggle-container:not(.dragging)')];
+    const after = siblings.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        return (e.clientY - box.top) < (box.bottom - e.clientY) ? child : closest;
+    }, null);
+    if (after && dragItem !== after) dspChain.insertBefore(dragItem, after);
+    else if (!after) dspChain.appendChild(dragItem);
+});
+
+// ─────────────────────────────────────────────
+// AUDIO HELPERS
+// ─────────────────────────────────────────────
+
+// [FIX #4] calculateRMS — 단일 정의, step 제거, peak 반환 제거 (RMS만 반환)
+function calculateRMS(buffer) {
+    let totalSum = 0;
+    const channels = buffer.numberOfChannels;
+    for (let c = 0; c < channels; c++) {
+        const data = buffer.getChannelData(c);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) {
+            sum += data[i] * data[i];
+        }
+        totalSum += sum / data.length;
+    }
+    return Math.sqrt(totalSum / channels);
+}
+
+function makeAnalogSoulCurve(gain) {
+    const n = 44100;
+    const curve = new Float32Array(n);
+    const k = gain;
+    for (let i = 0; i < n; i++) {
+        const x = (i * 2) / n - 1;
+        // Tanh-based saturation for soft, analog-style clipping
+        curve[i] = (Math.tanh(k * x) / Math.tanh(k)) * 0.95;
+    }
+    return curve;
+}
+
+function createOfflineContext(channels, length, sampleRate) {
+    const Cls = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    return new Cls(channels, length, sampleRate);
+}
+
+// [FIX #2] applySafety — 독립 함수로 분리 (IIFE 제거)
+function applySafety(buffer) {
+    // [FIX #5] maxP를 let으로 선언
+    let maxP = 0;
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+        const d = buffer.getChannelData(c);
+        for (let i = 0; i < d.length; i++) {
+            const a = Math.abs(d[i]);
+            if (a > maxP) maxP = a;
+        }
+    }
+    // Always normalize to -1.0dB for consistency, regardless of current peak
+    const targetPeak = 0.89;
+    if (maxP > 0) {
+        const r = targetPeak / maxP; 
+        for (let c = 0; c < buffer.numberOfChannels; c++) {
+            const d = buffer.getChannelData(c);
+            for (let i = 0; i < d.length; i++) d[i] *= r;
+        }
+    }
+    return buffer;
+}
+
+// ─────────────────────────────────────────────
+// DSP ENGINE
+// ─────────────────────────────────────────────
+async function runLegacyDSP(buffer, chainOrder, presetName) {
+    try {
+        const off = createOfflineContext(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+        const source = off.createBufferSource();
+        source.buffer = buffer;
+        const profile = PROFILES[presetName] || PROFILES.music_balanced;
+        let outNode = source;
+
+        // Warmth shelf
+        const warmth = off.createBiquadFilter();
+        warmth.type = 'lowshelf';
+        warmth.frequency.value = 250;
+        warmth.gain.value = profile.warmth;
+        outNode.connect(warmth);
+        outNode = warmth;
+
+        // Pre-gain headroom: Lowered to 0.75 (-2.5dB) for safer filter operations
+        const preGain = off.createGain();
+        preGain.gain.value = 0.8;
+        outNode.connect(preGain);
+        outNode = preGain;
+
+        for (const m of chainOrder) {
+            if (m === 'match_volume') continue;
+
+            // [FIX #3] opt ID를 올바른 문자열 연산으로 생성 (템플릿 리터럴 내 const 제거)
+            const optId = 'opt-' + m.replace(/_/g, '-');
+            const optEl = document.getElementById(optId);
+            if (!optEl || !optEl.checked) continue;
+
+            const valId = 'val-' + m.replace(/_/g, '-');
+            const valEl = document.getElementById(valId);
+            const v = valEl ? parseFloat(valEl.value) / 100.0 : 0.5;
+
+            switch (m) {
+                case 'highpass': {
+                    const hp = off.createBiquadFilter();
+                    hp.type = 'highpass';
+                    // val-highpass는 max=150이므로 Hz 단위로 직접 사용
+                    hp.frequency.value = parseFloat(valEl.value);
+                    outNode.connect(hp);
+                    outNode = hp;
+                    break;
+                }
+                case 'multiband': {
+                    // [FIX #7] LR4 필터 쌍 내부 연결 추가 (f1 → f2)
+                    const createLR4 = (freq, type) => {
+                        const f1 = off.createBiquadFilter(); f1.type = type; f1.frequency.value = freq; f1.Q.value = 0.707;
+                        const f2 = off.createBiquadFilter(); f2.type = type; f2.frequency.value = freq; f2.Q.value = 0.707;
+                        f1.connect(f2); // ← 연결 추가
+                        return [f1, f2];
+                    };
+                    const lP = createLR4(200, 'lowpass');
+                    const hP = createLR4(3200, 'highpass');
+                    const mP1 = createLR4(200, 'highpass');
+                    const mP2 = createLR4(3200, 'lowpass');
+
+                    const lC = off.createDynamicsCompressor(); lC.threshold.value = -20; lC.ratio.value = 2.0; lC.attack.value = 0.003;
+                    const mC = off.createDynamicsCompressor(); mC.threshold.value = -18; mC.ratio.value = 1.6;
+                    const hC = off.createDynamicsCompressor(); hC.threshold.value = -22; hC.ratio.value = 1.4;
+                    const mbM = off.createGain();
+                    // Increased compensation (-4.5dB) for safer band summing
+                    mbM.gain.value = 0.60;
+
+                    outNode.connect(lP[0]); lP[1].connect(lC); lC.connect(mbM);
+                    outNode.connect(hP[0]); hP[1].connect(hC); hC.connect(mbM);
+                    outNode.connect(mP1[0]); mP1[1].connect(mP2[0]); mP2[1].connect(mC); mC.connect(mbM);
+
+                    outNode = mbM;
+                    break;
+                }
+                case 'punchy_bass': {
+                    if (profile.pb_gain > 0) {
+                        const pb = off.createBiquadFilter();
+                        pb.type = 'peaking';
+                        pb.frequency.value = 90;
+                        pb.gain.value = v * profile.pb_gain;
+                        outNode.connect(pb);
+                        outNode = pb;
+                    }
+                    break;
+                }
+                case 'super_res': {
+                    const sSh = off.createBiquadFilter();
+                    sSh.type = 'highshelf';
+                    sSh.frequency.value = 6000;
+                    sSh.gain.value = v * profile.sr_gain;
+                    const sDs = off.createWaveShaper();
+                    // Softer analog saturation curve (Range 1.1 ~ 2.0 for subtle warmth)
+                    sDs.curve = makeAnalogSoulCurve(1.1 + (v * 0.9));
+                    outNode.connect(sSh);
+                    sSh.connect(sDs);
+                    outNode = sDs;
+                    break;
+                }
+                case 'brilliance': {
+                    if (profile.br_gain > 0) {
+                        const bSh = off.createBiquadFilter();
+                        bSh.type = 'highshelf';
+                        bSh.frequency.value = 9500;
+                        bSh.gain.value = v * profile.br_gain;
+                        outNode.connect(bSh);
+                        outNode = bSh;
+                    }
+                    break;
+                }
+                case 'stereo': {
+                    if (buffer.numberOfChannels >= 2) {
+                        const sp = off.createChannelSplitter(2);
+                        const mg = off.createChannelMerger(2);
+                        const d = off.createDelay();
+                        d.delayTime.value = 0.012 * v * profile.st_mul;
+                        outNode.connect(sp);
+                        sp.connect(d, 1);
+                        d.connect(mg, 0, 1);
+                        sp.connect(mg, 0, 0);
+                        outNode = mg;
+                    }
+                    break;
+                }
+                case 'limiter': {
+                    const lim = off.createDynamicsCompressor();
+                    // Drive the compressor harder based on lim_mul
+                    lim.threshold.value = (-3 - (v * 9)) * (1.0 / (profile.lim_mul + 1e-8));
+                    lim.ratio.value     = 10 + (v * 10);
+                    lim.knee.value      = 0;
+                    lim.attack.value    = 0;
+                    lim.release.value   = 0.05 + (v * 0.05);
+                    outNode.connect(lim);
+                    outNode = lim;
+                    break;
+                }
+            }
+        }
+
+        // --- FINAL GUARD (Internal Brick-wall) ---
+        const finalGuard = off.createDynamicsCompressor();
+        finalGuard.threshold.value = -1.0; // Prevent internal node clipping
+        finalGuard.ratio.value     = 20;
+        finalGuard.attack.value    = 0;
+        outNode.connect(finalGuard);
+        outNode = finalGuard;
+
+        // 안전 클리퍼 — 리미터 이중 적용 방지를 위해 ratio를 낮게 유지
+        // 목적: 절대 클리핑 방지용 안전망일 뿐, 음색에 영향 최소화
+        const safetyClipper = off.createDynamicsCompressor();
+        safetyClipper.threshold.value = -0.5;   // 거의 풀스케일에서만 작동
+        safetyClipper.ratio.value     = 20;
+        safetyClipper.knee.value      = 0;
+        safetyClipper.attack.value    = 0.0005;
+        safetyClipper.release.value   = 0.1;
+        outNode.connect(safetyClipper);
+        outNode = safetyClipper;
+
+        outNode.connect(off.destination);
+        source.start();
+        let rend = await off.startRendering();
+
+        // --- FINAL STAGE: Match Volume & Safety ---
+        
+        // 1. First Pass: Peak Normalize to -0.1dB to keep samples legal
+        let maxP = 0;
+        for (let c = 0; c < rend.numberOfChannels; c++) {
+            const d = rend.getChannelData(c);
+            for (let i = 0; i < d.length; i++) {
+                const a = Math.abs(d[i]);
+                if (a > maxP) maxP = a;
+            }
+        }
+        if (maxP > 0) {
+            const r = 0.99 / maxP;
+            for (let c = 0; c < rend.numberOfChannels; c++) {
+                const d = rend.getChannelData(c);
+                for (let i = 0; i < d.length; i++) d[i] *= r;
+            }
+        }
+
+        // 2. Second Pass: Match Volume (Applied BEFORE final safety)
+        if (document.getElementById('opt-match-volume').checked) {
+            const origRMS = calculateRMS(buffer);
+            const rendRMS = calculateRMS(rend);
+            
+            // Peak-aware volume matching
+            let rendPeak = 0;
+            for (let c = 0; c < rend.numberOfChannels; c++) {
+                const d = rend.getChannelData(c);
+                for (let i = 0; i < d.length; i++) {
+                    const a = Math.abs(d[i]);
+                    if (a > rendPeak) rendPeak = a;
+                }
+            }
+            
+            let ratio = origRMS / (rendRMS + 1e-8);
+            // If the boost would cause extreme peaking (> 3.0), scale it down
+            if (rendPeak * ratio > 2.5) {
+                ratio = 2.5 / rendPeak;
+            }
+            // Absolute safety cap
+            ratio = Math.min(2.0, ratio);
+
+            for (let c = 0; c < rend.numberOfChannels; c++) {
+                const d = rend.getChannelData(c);
+                for (let i = 0; i < d.length; i++) d[i] *= ratio;
+            }
+        }
+
+        // 3. Third Pass: Soft-Clip Transients
+        // Gently rounds off any peaks that overshot during volume matching
+        for (let c = 0; c < rend.numberOfChannels; c++) {
+            const d = rend.getChannelData(c);
+            for (let i = 0; i < d.length; i++) {
+                const x = d[i];
+                if (Math.abs(x) > 0.95) {
+                    d[i] = Math.sign(x) * (0.95 + (1 - 0.95) * Math.tanh((Math.abs(x) - 0.95) / (1 - 0.95)));
+                }
+            }
+        }
+
+        // 4. Final Pass: Apply Global Safety (-1.0dB Target)
+        applySafety(rend);
+
+        source.buffer = null;
+        return rend;
+    } catch (err) {
+        console.error('DSP Error:', err);
+        return buffer;
+    }
+}
+
+// ─────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────
+let aCtx = null;
+let wsO = null, wsR = null;
+let resL = [];
+let currentRecJSON = null;
+let lastF = [];
+
+const domEl = {
+    drop:   document.getElementById('drop-zone'),
+    input:  document.getElementById('audio-file'),
+    name:   document.getElementById('file-name-display'),
+    sub:    document.getElementById('submit-btn'),
+    load:   document.getElementById('loader'),
+    result: document.getElementById('result-area'),
+    oP:     document.getElementById('original-player'),
+    rP:     document.getElementById('restored-player'),
+    dl:     document.getElementById('download-link')
+};
+
+// ─────────────────────────────────────────────
+// FILE INPUT
+// ─────────────────────────────────────────────
+// drop-zone이 <label for='audio-file'>이므로 클릭 핸들러 불필요 (브라우저 네이티브 처리)
+
+domEl.input.addEventListener('change', e => {
+    lastF = Array.from(e.target.files);
+    domEl.name.textContent = lastF.length + '개 파일 선택됨';
+    domEl.sub.disabled = lastF.length === 0;
+});
+
+domEl.drop.addEventListener('dragover', e => e.preventDefault());
+
+domEl.drop.addEventListener('drop', e => {
+    e.preventDefault();
+    lastF = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('audio/'));
+    domEl.name.textContent = lastF.length + '개 파일 선택됨';
+    domEl.sub.disabled = lastF.length === 0;
+});
+
+// ─────────────────────────────────────────────
+// FORM SUBMIT  [FIX #1] — onsubmit 단일 정의
+// ─────────────────────────────────────────────
+document.getElementById('upload-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (lastF.length === 0) return;
+
+    domEl.load.style.display = 'block';
+    domEl.result.style.display = 'none';
+    domEl.sub.disabled = true;
+
+    try {
+        if (!aCtx) aCtx = new (window.AudioContext || window.webkitAudioContext)();
+        resL = [];
+
+        const chainModules = [...dspChain.querySelectorAll('.toggle-container')].map(el => el.dataset.module);
+        const presetName = document.getElementById('quality-preset').value;
+
+        for (let i = 0; i < lastF.length; i++) {
+            document.getElementById('status-text').textContent = `처리 중: ${i + 1} / ${lastF.length}`;
+            const arrayBuf = await lastF[i].arrayBuffer();
+            const audioBuf = await aCtx.decodeAudioData(arrayBuf);
+            const restored = await runLegacyDSP(audioBuf, chainModules, presetName);
+            const blob = bufferToWave(restored, restored.length);
+            const url = URL.createObjectURL(blob);
+            resL.push({
+                name: lastF[i].name,
+                url,
+                blob,
+                orig: URL.createObjectURL(lastF[i]),
+                buffer: restored
+            });
+        }
+
+        if (resL.length > 0) {
+            renderBatchList();
+            await showResult(0);
+            // [FIX #8] ZIP 버튼 표시 (배치 2개 이상)
+            document.getElementById('zip-download-btn').style.display = resL.length > 1 ? 'block' : 'none';
+        }
+    } catch (err) {
+        alert('처리 중 오류: ' + err.message);
+        console.error(err);
+    }
+
+    domEl.load.style.display = 'none';
+    domEl.sub.disabled = false;
+});
+
+// ─────────────────────────────────────────────
+// BATCH LIST
+// ─────────────────────────────────────────────
+function renderBatchList() {
+    document.getElementById('batch-list').innerHTML = resL
+        .map((r, i) => {
+            const size = (r.blob.size / 1024 / 1024).toFixed(1) + 'MB';
+            return `
+            <li class="batch-item ${i === 0 ? 'active' : ''}" onclick="showResult(${i})">
+                <span>${r.name}</span>
+                <span class="file-size">${size}</span>
+            </li>`;
+        })
+        .join('');
+}
+
+// ─────────────────────────────────────────────
+// WAVESURFER
+// ─────────────────────────────────────────────
+function initWaveSurfer(containerId, mediaEl, url, color) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = '';
+    return WaveSurfer.create({
+        container,
+        waveColor: 'rgba(255,255,255,0.1)',
+        progressColor: color,
+        url,
+        media: mediaEl,
+        height: 80,
+        barWidth: 2,
+        barGap: 3,
+        barRadius: 4,
+        normalize: true,
+        fillParent: true,
+        autoCenter: true,
+        dragToSeek: true
+    });
+}
+
+const formatTime = s => {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+};
+
+// ─────────────────────────────────────────────
+// SHOW RESULT  [FIX #6] — getAI 호출 추가
+// ─────────────────────────────────────────────
+async function showResult(idx) {
+    const r = resL[idx];
+    [...document.getElementById('batch-list').children].forEach((el, i) => el.classList.toggle('active', i === idx));
+
+    domEl.result.style.display = 'block';
+    
+    // [FIX] 브라우저가 결과 레이아웃을 계산할 시간을 주기 위해 한 프레임 대기
+    requestAnimationFrame(async () => {
+        if (wsO) wsO.destroy();
+        if (wsR) wsR.destroy();
+
+        domEl.oP.src = r.orig;
+        domEl.rP.src = r.url;
+
+        const isRestored = document.getElementById('ab-toggle-btn').classList.contains('restored');
+        domEl.oP.muted = isRestored;
+        domEl.rP.muted = !isRestored;
+
+        // [FIX] Update UI labels initial state
+        const oLabel = document.getElementById('mode-original');
+        const rLabel = document.getElementById('mode-restored');
+        const oStatus = document.getElementById('orig-status');
+        const rStatus = document.getElementById('rest-status');
+
+        oLabel.classList.toggle('active', !isRestored);
+        rLabel.classList.toggle('active', isRestored);
+        
+        if (oStatus && rStatus) {
+            oStatus.textContent = isRestored ? 'READY' : 'ACTIVE';
+            oStatus.style.color = isRestored ? 'var(--text-muted)' : 'var(--accent)';
+            rStatus.textContent = isRestored ? 'ACTIVE' : 'READY';
+            rStatus.style.color = isRestored ? 'var(--accent)' : 'var(--text-muted)';
+        }
+
+        wsO = initWaveSurfer('waveform-original', domEl.oP, r.orig, '#06b6d4');
+        wsR = initWaveSurfer('waveform-restored', domEl.rP, r.url, '#818cf8');
+
+        wsO.on('ready', () => {
+            document.getElementById('time-total').textContent = formatTime(wsO.getDuration());
+        });
+        wsO.on('timeupdate', () => {
+            document.getElementById('time-current').textContent = formatTime(wsO.getCurrentTime());
+        });
+
+        // [PORT FROM index.html] Sync timelines on interaction
+        wsO.on('interaction', () => { domEl.rP.currentTime = domEl.oP.currentTime; });
+        wsR.on('interaction', () => { domEl.oP.currentTime = domEl.rP.currentTime; });
+
+        domEl.dl.href = r.url;
+        domEl.dl.download = r.name.replace(/\.([^.]+)$/, '_Restored.$1');
+
+        // Metrics
+        const data = r.buffer.getChannelData(0);
+        let sum = 0, peak = 0;
+        for (let i = 0; i < data.length; i++) {
+            sum += data[i] * data[i];
+            const a = Math.abs(data[i]);
+            if (a > peak) peak = a;
+        }
+        const rms = Math.sqrt(sum / data.length);
+        let estimatedLUFS = 20 * Math.log10(rms + 1e-12);
+        const crest = peak / (rms + 1e-12);
+        estimatedLUFS -= Math.min(6, (crest - 3) * 0.8);
+        estimatedLUFS = Number.isFinite(estimatedLUFS) ? Math.max(-60, Math.min(0, estimatedLUFS)) : -24;
+
+        let crestValue = 20 * Math.log10(crest);
+        crestValue = Number.isFinite(crestValue) ? Math.max(3, Math.min(24, crestValue)) : 12;
+
+        const metrics = {
+            lufs:  estimatedLUFS.toFixed(1),
+            crest: crestValue.toFixed(1),
+            phase: r.buffer.numberOfChannels > 1 ? '0.98 / Stereo' : '1.0 / Mono'
+        };
+
+        document.getElementById('metric-lufs').textContent  = metrics.lufs;
+        document.getElementById('metric-crest').textContent = metrics.crest;
+        document.getElementById('metric-phase').textContent = metrics.phase;
+
+        // [FIX #6] AI 분석 호출
+        await getAI(metrics);
+    });
+}
+
+// ─────────────────────────────────────────────
+// AI (GROQ)
+// ─────────────────────────────────────────────
+function clampDSP(name, value) {
+    const n = Number(value);
+    if (Number.isNaN(n)) return 50;
+    const limits = {
+        multiband:  [20, 75],
+        punchy_bass:[0,  60],
+        super_res:  [0,  70],
+        brilliance: [0,  70],
+        stereo:     [0,  75],
+        limiter:    [20, 85]
+    };
+    const range = limits[name] || [0, 100];
+    return Math.max(range[0], Math.min(range[1], Math.round(n)));
+}
+
+async function getAI(metrics) {
+    const key = (localStorage.getItem('groq_api_key') || '').trim();
+    const fbEl     = document.getElementById('ai-feedback-text');
+    const recList  = document.getElementById('ai-rec-list');
+    const applyBtn = document.getElementById('apply-ai-btn');
+
+    currentRecJSON = null;
+
+    if (!key || !key.startsWith('gsk_')) {
+        fbEl.textContent = 'Groq API 키가 없어 AI 분석을 건너뜁니다. ⚙️ 버튼으로 설정하세요.';
+        applyBtn.textContent = 'API 키 필요';
+        applyBtn.classList.remove('ready');
+        return;
+    }
+
+    fbEl.textContent = '🤖 ANALYZING AUDIO PROFILE...';
+    recList.textContent = 'AI가 오디오 특성을 분석 중입니다...';
+    applyBtn.textContent = '분석 중...';
+    applyBtn.classList.remove('ready');
+
+    try {
+        const presetLabel = document.getElementById('quality-preset').selectedOptions[0].text;
+        const prompt = `Audio Mastering Analysis: LUFS=${metrics.lufs}, Crest Factor=${metrics.crest}, Phase=${metrics.phase}.
+Target Mastering Style: ${presetLabel}.
+Provide contextual advice and parameters in JSON format.
+REQUIRED JSON KEYS: "advice", "multiband", "punchy_bass", "super_res", "brilliance", "stereo", "limiter".
+"advice" must be a concise mastering engineer tip in Korean, specifically tailored to the target style and audio metrics. All other values 0-100.`;
+
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'llama-3.3-70b-versatile',
+                response_format: { type: 'json_object' },
+                temperature: 0.5,
+                max_tokens: 400,
+                messages: [
+                    { role: 'system', content: '당신은 세계적인 마스터링 엔지니어입니다. 오디오 통계에 기반하여 한국어로 전문적이고 친절한 조언을 제공하세요. 반드시 JSON 형식만 출력하세요.' },
+                    { role: 'user', content: prompt }
+                ]
+            })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data?.error?.message || `HTTP ${response.status}`);
+        if (!data?.choices?.[0]?.message?.content) throw new Error('Empty AI response');
+
+        const parsed = JSON.parse(data.choices[0].message.content.trim());
+
+        const safe = {
+            multiband:  clampDSP('multiband',  parsed.multiband),
+            punchy_bass:clampDSP('punchy_bass', parsed.punchy_bass),
+            super_res:  clampDSP('super_res',   parsed.super_res),
+            brilliance: clampDSP('brilliance',  parsed.brilliance),
+            stereo:     clampDSP('stereo',      parsed.stereo),
+            limiter:    clampDSP('limiter',     parsed.limiter)
+        };
+
+        currentRecJSON = safe;
+        fbEl.textContent = parsed.advice || 'AI 분석 완료. 오디오 특성 기반 최적 DSP 값을 생성했습니다.';
+        fbEl.style.color = 'var(--text)';
+        recList.innerHTML = `<div style="line-height:1.8;">
+            🎛 Multiband: ${safe.multiband}<br>
+            🔊 Punchy Bass: ${safe.punchy_bass}<br>
+            ✨ Super Resolution: ${safe.super_res}<br>
+            🌟 Brilliance: ${safe.brilliance}<br>
+            🎧 Stereo Width: ${safe.stereo}<br>
+            🚨 Limiter: ${safe.limiter}
+        </div>`;
+        applyBtn.textContent = '✨ APPLY SMART TUNING';
+        applyBtn.classList.add('ready');
+
+    } catch (err) {
+        console.error('AI Error:', err);
+        fbEl.textContent = `AI 분석 실패: ${err.message}`;
+        recList.textContent = 'Fallback 상태로 전환되었습니다.';
+        applyBtn.textContent = 'AI 오류';
+        applyBtn.classList.remove('ready');
+    }
+}
+
+// ─────────────────────────────────────────────
+// PLAYBACK CONTROLS
+// ─────────────────────────────────────────────
+document.getElementById('master-play-btn').addEventListener('click', () => {
+    const btn = document.getElementById('master-play-btn');
+    if (!domEl.oP.paused || !domEl.rP.paused) {
+        domEl.oP.pause();
+        domEl.rP.pause();
+        btn.textContent = '▶';
+    } else {
+        // [SAFETY] Enforce current A/B state before playing
+        const isR = document.getElementById('ab-toggle-btn').classList.contains('restored');
+        domEl.oP.muted = isR;
+        domEl.rP.muted = !isR;
+
+        // Sync before play
+        domEl.rP.currentTime = domEl.oP.currentTime;
+        domEl.oP.play();
+        domEl.rP.play();
+        btn.textContent = '⏸';
+    }
+});
+
+document.getElementById('ab-toggle-btn').addEventListener('click', () => {
+    const btn = document.getElementById('ab-toggle-btn');
+    const isR = btn.classList.toggle('restored');
+    
+    // UI Update
+    const oLabel = document.getElementById('mode-original');
+    const rLabel = document.getElementById('mode-restored');
+    const oStatus = document.getElementById('orig-status');
+    const rStatus = document.getElementById('rest-status');
+
+    oLabel.classList.toggle('active', !isR);
+    rLabel.classList.toggle('active', isR);
+
+    if (oStatus && rStatus) {
+        oStatus.textContent = isR ? 'READY' : 'ACTIVE';
+        oStatus.style.color = isR ? 'var(--text-muted)' : 'var(--accent)';
+        rStatus.textContent = isR ? 'ACTIVE' : 'READY';
+        rStatus.style.color = isR ? 'var(--accent)' : 'var(--text-muted)';
+    }
+    
+    // [STRICT ENFORCEMENT] Ensure only one is audible
+    domEl.oP.muted = isR;
+    domEl.rP.muted = !isR;
+    
+    // Double check to prevent simultaneous playback leakage
+    if (domEl.oP.muted) domEl.oP.volume = 0; else domEl.oP.volume = 1;
+    if (domEl.rP.muted) domEl.rP.volume = 0; else domEl.rP.volume = 1;
+});
+
+// [FIX #9] apply-ai-btn — el 변수명 충돌 해결 (rangeEl로 명명)
+document.getElementById('apply-ai-btn').addEventListener('click', () => {
+    if (!currentRecJSON || !document.getElementById('apply-ai-btn').classList.contains('ready')) return;
+    Object.entries(currentRecJSON).forEach(([k, v]) => {
+        const rangeEl = document.getElementById('val-' + k.replace(/_/g, '-'));
+        if (rangeEl) {
+            rangeEl.value = Math.min(100, Math.max(0, v));
+            updateSafetyUI(rangeEl);
+        }
+    });
+});
+
+// ─────────────────────────────────────────────
+// ZIP DOWNLOAD  [FIX #8] — 이벤트 리스너 연결
+// ─────────────────────────────────────────────
+document.getElementById('zip-download-btn').addEventListener('click', async () => {
+    if (resL.length === 0) return;
+    const btn = document.getElementById('zip-download-btn');
+    btn.textContent = '⏳ ZIP 생성 중...';
+    btn.disabled = true;
+    try {
+        const zip = new JSZip();
+        for (const r of resL) {
+            const ab = await r.blob.arrayBuffer();
+            zip.file(r.name.replace(/\.([^.]+)$/, '_Restored.wav'), ab);
+        }
+        const content = await zip.generateAsync({ type: 'blob' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(content);
+        a.download = 'AnalogSoul_Batch.zip';
+        a.click();
+    } catch (err) {
+        alert('ZIP 생성 오류: ' + err.message);
+    }
+    btn.textContent = '📦 BATCH ZIP DOWNLOAD';
+    btn.disabled = false;
+});
+
+// ─────────────────────────────────────────────
+// WAV ENCODER
+// ─────────────────────────────────────────────
+function bufferToWave(ab, l) {
+    const n = ab.numberOfChannels;
+    const len = l * n * 2 + 44;
+    const buffer = new ArrayBuffer(len);
+    const view = new DataView(buffer);
+    let p = 0;
+    const s32 = d => { view.setUint32(p, d, true); p += 4; };
+    const s16 = d => { view.setInt16(p, d, true); p += 2; };
+    s32(0x46464952); s32(len - 8); s32(0x45564157);
+    s32(0x20746d66); s32(16); s16(1); s16(n);
+    s32(ab.sampleRate); s32(ab.sampleRate * n * 2); s16(n * 2); s16(16);
+    s32(0x61746164); s32(len - 44);
+    for (let i = 0; i < l; i++) {
+        for (let c = 0; c < n; c++) {
+            const sample = Math.max(-1, Math.min(1, ab.getChannelData(c)[i]));
+            s16(sample < 0 ? sample * 0x8000 : sample * 0x7fff);
+        }
+    }
+    return new Blob([buffer], { type: 'audio/wav' });
+}
+
+// ─────────────────────────────────────────────
+// SETTINGS MODAL
+// ─────────────────────────────────────────────
+document.getElementById('settings-btn').addEventListener('click', () => {
+    document.getElementById('groq-api-key').value = localStorage.getItem('groq_api_key') || '';
+    document.getElementById('settings-modal').style.display = 'flex';
+});
+document.getElementById('modal-close').addEventListener('click', () => {
+    document.getElementById('settings-modal').style.display = 'none';
+});
+document.getElementById('modal-save').addEventListener('click', () => {
+    const k = document.getElementById('groq-api-key').value.trim();
+    localStorage.setItem('groq_api_key', k);
+    document.getElementById('settings-modal').style.display = 'none';
+});
+
+// ─────────────────────────────────────────────
+// INIT — script가 </body> 직전이므로 DOM 이미 존재
+// DOMContentLoaded는 이미 발화 완료 후라 콜백 실행 안 됨 → 직접 실행
+// ─────────────────────────────────────────────
+applyPreset(document.getElementById('quality-preset').value);
+
+document.getElementById('quality-preset').addEventListener('change', e => {
+    applyPreset(e.target.value);
+});
+
+document.querySelectorAll('input[type="range"]').forEach(input => {
+    input.addEventListener('input', () => updateSafetyUI(input));
+    updateSafetyUI(input);
+});
+</script>
+</body>
+</html>
