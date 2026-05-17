@@ -762,7 +762,7 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
 
         // Pre-gain headroom
         const preGain = off.createGain();
-        preGain.gain.value = 0.8;
+        preGain.gain.value = 0.9; // [FIX] 0.8→0.9: 음압 손실 최소화
         outNode.connect(preGain);
         outNode = preGain;
 
@@ -802,7 +802,7 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
                     const mC = off.createDynamicsCompressor(); mC.threshold.value = -18; mC.ratio.value = 1.6;
                     const hC = off.createDynamicsCompressor(); hC.threshold.value = -22; hC.ratio.value = 1.4;
                     const mbM = off.createGain();
-                    mbM.gain.value = 0.60;
+                    mbM.gain.value = 1.0; // [FIX] 0.60→1.0: 3밴드 합산 볼륨 손실 제거
 
                     outNode.connect(lP[0]); lP[1].connect(lC); lC.connect(mbM);
                     outNode.connect(hP[0]); hP[1].connect(hC); hC.connect(mbM);
@@ -823,15 +823,17 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
                     break;
                 }
                 case 'super_res': {
+                    // [FIX] WaveShaper 먼저 → highshelf 순서로 변경
+                    // (고역 부스트 후 비선형 처리 시 6kHz 이상 하모닉 왜곡 집중 방지)
+                    const sDs = off.createWaveShaper();
+                    sDs.curve = makeAnalogSoulCurve(1.1 + (v * 0.9));
                     const sSh = off.createBiquadFilter();
                     sSh.type = 'highshelf';
                     sSh.frequency.value = 6000;
                     sSh.gain.value = v * profile.sr_gain;
-                    const sDs = off.createWaveShaper();
-                    sDs.curve = makeAnalogSoulCurve(1.1 + (v * 0.9));
-                    outNode.connect(sSh);
-                    sSh.connect(sDs);
-                    outNode = sDs;
+                    outNode.connect(sDs);
+                    sDs.connect(sSh);
+                    outNode = sSh;
                     break;
                 }
                 case 'brilliance': {
@@ -850,7 +852,7 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
                         const sp = off.createChannelSplitter(2);
                         const mg = off.createChannelMerger(2);
                         const d = off.createDelay();
-                        d.delayTime.value = 0.012 * v * profile.st_mul;
+                        d.delayTime.value = Math.min(0.006, 0.012 * v * profile.st_mul); // [FIX] 6ms 상한: 모노 호환성 (comb filter 방지)
                         outNode.connect(sp);
                         sp.connect(d, 1);
                         d.connect(mg, 0, 1);
@@ -861,7 +863,7 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
                 }
                 case 'limiter': {
                     const lim = off.createDynamicsCompressor();
-                    lim.threshold.value = (-3 - (v * 9)) * (1.0 / (profile.lim_mul + 1e-8));
+                    lim.threshold.value = (-3 - (v * 9)) * profile.lim_mul; // [FIX] 나누기→곱하기: threshold 역전 방지
                     lim.ratio.value     = 10 + (v * 10);
                     lim.knee.value      = 0;
                     lim.attack.value    = 0;
@@ -873,14 +875,7 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
             }
         }
 
-        // FINAL GUARD
-        const finalGuard = off.createDynamicsCompressor();
-        finalGuard.threshold.value = -1.0;
-        finalGuard.ratio.value     = 20;
-        finalGuard.attack.value    = 0;
-        outNode.connect(finalGuard);
-        outNode = finalGuard;
-
+        // [FIX] finalGuard 제거 — limiter case + safetyClipper로 충분 (3중 리미터 방지)
         const safetyClipper = off.createDynamicsCompressor();
         safetyClipper.threshold.value = -0.5;
         safetyClipper.ratio.value     = 20;
@@ -895,61 +890,36 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
         let rend = await off.startRendering();
 
         // --- FINAL STAGE: Match Volume & Safety ---
-        // 1. Peak normalize to -0.1dB
-        let maxP = 0;
-        for (let c = 0; c < rend.numberOfChannels; c++) {
-            const d = rend.getChannelData(c);
-            for (let i = 0; i < d.length; i++) {
-                const a = Math.abs(d[i]);
-                if (a > maxP) maxP = a;
-            }
-        }
-        if (maxP > 0) {
-            const r = 0.99 / maxP;
-            for (let c = 0; c < rend.numberOfChannels; c++) {
-                const d = rend.getChannelData(c);
-                for (let i = 0; i < d.length; i++) d[i] *= r;
-            }
-        }
+        // [FIX] 처리 순서 재정립:
+        //   1. Match Volume (RMS 기반, 단일 클램프 1.5)
+        //   2. Soft-Clip Transients
+        //   3. applySafety (클리핑 방지 안전망, Match Volume 이후에만 실행)
 
-        // 2. Match Volume (Peak-aware)
+        // 1. Match Volume
         if (document.getElementById('opt-match-volume').checked) {
             const origRMS = calculateRMS(buffer);
             const rendRMS = calculateRMS(rend);
-
-            let rendPeak = 0;
-            for (let c = 0; c < rend.numberOfChannels; c++) {
-                const d = rend.getChannelData(c);
-                for (let i = 0; i < d.length; i++) {
-                    const a = Math.abs(d[i]);
-                    if (a > rendPeak) rendPeak = a;
-                }
-            }
-
-            let ratio = origRMS / (rendRMS + 1e-8);
-            if (rendPeak * ratio > 2.5) {
-                ratio = 2.5 / rendPeak;
-            }
-            ratio = Math.min(2.0, ratio);
-
+            // [FIX] 이중 클램프(2.5/2.0) → 단일 1.5 클램프 (+3.5dB 상한)
+            let ratio = Math.min(1.5, origRMS / (rendRMS + 1e-8));
             for (let c = 0; c < rend.numberOfChannels; c++) {
                 const d = rend.getChannelData(c);
                 for (let i = 0; i < d.length; i++) d[i] *= ratio;
             }
         }
 
-        // 3. Soft-Clip Transients
+        // 2. Soft-Clip Transients
         for (let c = 0; c < rend.numberOfChannels; c++) {
             const d = rend.getChannelData(c);
             for (let i = 0; i < d.length; i++) {
                 const x = d[i];
                 if (Math.abs(x) > 0.95) {
-                    d[i] = Math.sign(x) * (0.95 + (1 - 0.95) * Math.tanh((Math.abs(x) - 0.95) / (1 - 0.95)));
+                    d[i] = Math.sign(x) * (0.95 + 0.05 * Math.tanh((Math.abs(x) - 0.95) / 0.05));
                 }
             }
         }
 
-        // 4. Final Pass: Apply Global Safety (-1.0dB Target)
+        // 3. applySafety — [FIX] Match Volume 이후에 실행해서 덮어쓰기 방지
+        //    조건부: 실제로 피크가 0.89 초과할 때만 작동
         applySafety(rend);
 
         source.buffer = null;
