@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>NOVA ANALOG ENGINE V6.5 ELITE</title>
+    <title>NOVA ANALOG ENGINE V6.5 ELITE — Improved</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -352,7 +352,7 @@
         <button type="submit" id="submit-btn" class="primary-btn" disabled>고품질 마스터링 시작</button>
     </form>
 
-    <div class="loader-container" id="loader">
+    <div class="loader-container" id="loader" style="display:none;">
         <div class="loader"></div>
         <div id="status-text" style="font-weight:700; color:var(--accent); letter-spacing:0.1em; font-size:0.8rem;">NOVA ENGINE PROCESSING...</div>
     </div>
@@ -433,7 +433,7 @@
 
 <script>
 // ─────────────────────────────────────────────
-// CONSTANTS
+// CONSTANTS (unchanged)
 // ─────────────────────────────────────────────
 const PRESET_MAP = {
     music_balanced: {
@@ -491,6 +491,85 @@ const SAFETY_THRESHOLDS = {
 };
 
 // ─────────────────────────────────────────────
+// STATE & CACHED DOM
+// ─────────────────────────────────────────────
+let aCtx = null;
+let wsO = null, wsR = null;
+let resL = [];
+let currentRecJSON = null;
+let lastF = [];
+
+const domEl = {
+    drop:   document.getElementById('drop-zone'),
+    input:  document.getElementById('audio-file'),
+    name:   document.getElementById('file-name-display'),
+    sub:    document.getElementById('submit-btn'),
+    load:   document.getElementById('loader'),
+    result: document.getElementById('result-area'),
+    oP:     document.getElementById('original-player'),
+    rP:     document.getElementById('restored-player'),
+    dl:     document.getElementById('download-link'),
+    statusText: document.getElementById('status-text'),
+    applyAiBtn: document.getElementById('apply-ai-btn'),
+    aiFeedback: document.getElementById('ai-feedback-text'),
+    aiRecList: document.getElementById('ai-rec-list'),
+    zipBtn: document.getElementById('zip-download-btn'),
+    batchList: document.getElementById('batch-list')
+};
+
+// ─────────────────────────────────────────────
+// HELPERS: Resource cleanup
+// ─────────────────────────────────────────────
+function revokeResultURLs(r) {
+    try {
+        if (!r) return;
+        if (r.url) { try { URL.revokeObjectURL(r.url); } catch (e) { console.warn('revoke url failed', e); } }
+        if (r.orig) { try { URL.revokeObjectURL(r.orig); } catch (e) { console.warn('revoke orig failed', e); } }
+    } catch (e) { console.warn('revokeResultURLs error', e); }
+}
+
+async function clearAllResults() {
+    // Revoke existing blob URLs
+    try { resL.forEach(revokeResultURLs); } catch (e) { console.warn('clear resL revoke error', e); }
+    resL = [];
+
+    // Destroy WaveSurfer instances
+    try { if (wsO) { wsO.destroy(); wsO = null; } } catch(e) { console.warn('wsO destroy', e); }
+    try { if (wsR) { wsR.destroy(); wsR = null; } } catch(e) { console.warn('wsR destroy', e); }
+
+    // Revoke download href if blob
+    try {
+        if (domEl.dl && domEl.dl.href && domEl.dl.href.startsWith('blob:')) {
+            try { URL.revokeObjectURL(domEl.dl.href); } catch(e){ /* ignore */ }
+            domEl.dl.href = '#';
+        }
+    } catch (e) { console.warn('revoke dl href', e); }
+
+    // Close AudioContext
+    try {
+        if (aCtx && aCtx.state !== 'closed') {
+            await aCtx.close();
+        }
+    } catch (e) {
+        console.warn('aCtx close failed', e);
+    } finally {
+        aCtx = null;
+    }
+
+    // UI cleanup
+    try {
+        domEl.batchList.innerHTML = '';
+        domEl.result.style.display = 'none';
+        domEl.name.textContent = 'NOVA CORE IS READY';
+    } catch (e) { /* ignore */ }
+}
+
+// Page unload cleanup
+window.addEventListener('beforeunload', async () => {
+    try { await clearAllResults(); } catch (e) { console.warn('beforeunload cleanup failed', e); }
+});
+
+// ─────────────────────────────────────────────
 // SAFETY UI
 // ─────────────────────────────────────────────
 function updateSafetyUI(rangeEl) {
@@ -529,10 +608,7 @@ function applyPreset(presetName) {
         } else {
             el.value = val;
         }
-        // 개별 요소의 Safety UI 즉시 갱신
-        if (id.startsWith('val-')) {
-            updateSafetyUI(el);
-        }
+        if (id.startsWith('val-')) updateSafetyUI(el);
     });
 
     // 2. DOM 순서 재배치 (DSP 체인 순서)
@@ -548,7 +624,7 @@ function applyPreset(presetName) {
 }
 
 // ─────────────────────────────────────────────
-// DRAG & DROP CHAIN REORDER
+// DRAG & DROP CHAIN REORDER (개선된 비교)
 // ─────────────────────────────────────────────
 const dspChain = document.getElementById('dsp-chain');
 let dragItem = null;
@@ -571,19 +647,23 @@ dspChain.addEventListener('dragover', e => {
     e.preventDefault();
     if (!dragItem) return;
     const siblings = [...dspChain.querySelectorAll('.toggle-container:not(.dragging)')];
-    const after = siblings.reduce((closest, child) => {
+    let closest = null;
+    let closestOffset = -Infinity;
+    siblings.forEach(child => {
         const box = child.getBoundingClientRect();
-        return (e.clientY - box.top) < (box.bottom - e.clientY) ? child : closest;
-    }, null);
-    if (after && dragItem !== after) dspChain.insertBefore(dragItem, after);
-    else if (!after) dspChain.appendChild(dragItem);
+        const offset = e.clientY - box.top - box.height / 2;
+        if (offset < 0 && offset > closestOffset) {
+            closestOffset = offset;
+            closest = child;
+        }
+    });
+    if (closest && dragItem !== closest) dspChain.insertBefore(dragItem, closest);
+    else if (!closest) dspChain.appendChild(dragItem);
 });
 
 // ─────────────────────────────────────────────
 // AUDIO HELPERS
 // ─────────────────────────────────────────────
-
-// [FIX #4] calculateRMS — 단일 정의, step 제거, peak 반환 제거 (RMS만 반환)
 function calculateRMS(buffer) {
     let totalSum = 0;
     const channels = buffer.numberOfChannels;
@@ -591,11 +671,37 @@ function calculateRMS(buffer) {
         const data = buffer.getChannelData(c);
         let sum = 0;
         for (let i = 0; i < data.length; i++) {
-            sum += data[i] * data[i];
+            const v = data[i];
+            sum += v * v;
         }
         totalSum += sum / data.length;
     }
     return Math.sqrt(totalSum / channels);
+}
+
+// 간단한 1차 하이패스(샘플 배열 레벨) — LUFS 근사 개선용 전처리
+function rmsWithHighpass(buffer, cutoff = 100) {
+    const sr = buffer.sampleRate;
+    const rc = 1 / (2 * Math.PI * cutoff);
+    const dt = 1 / sr;
+    const alpha = rc / (rc + dt);
+    let total = 0;
+    let chans = buffer.numberOfChannels;
+    for (let c = 0; c < chans; c++) {
+        const inData = buffer.getChannelData(c);
+        let yPrev = 0;
+        let xPrev = inData[0] || 0;
+        let sum = 0;
+        for (let i = 0; i < inData.length; i++) {
+            const x = inData[i];
+            const y = alpha * (yPrev + x - xPrev);
+            sum += y * y;
+            yPrev = y;
+            xPrev = x;
+        }
+        total += sum / inData.length;
+    }
+    return Math.sqrt(total / chans);
 }
 
 function makeAnalogSoulCurve(gain) {
@@ -604,7 +710,6 @@ function makeAnalogSoulCurve(gain) {
     const k = gain;
     for (let i = 0; i < n; i++) {
         const x = (i * 2) / n - 1;
-        // Tanh-based saturation for soft, analog-style clipping
         curve[i] = (Math.tanh(k * x) / Math.tanh(k)) * 0.95;
     }
     return curve;
@@ -615,9 +720,8 @@ function createOfflineContext(channels, length, sampleRate) {
     return new Cls(channels, length, sampleRate);
 }
 
-// [FIX #2] applySafety — 독립 함수로 분리 (IIFE 제거)
+// Safety normalization (keeps -1.0dB-ish)
 function applySafety(buffer) {
-    // [FIX #5] maxP를 let으로 선언
     let maxP = 0;
     for (let c = 0; c < buffer.numberOfChannels; c++) {
         const d = buffer.getChannelData(c);
@@ -626,10 +730,9 @@ function applySafety(buffer) {
             if (a > maxP) maxP = a;
         }
     }
-    // Always normalize to -1.0dB for consistency, regardless of current peak
     const targetPeak = 0.89;
     if (maxP > 0) {
-        const r = targetPeak / maxP; 
+        const r = targetPeak / maxP;
         for (let c = 0; c < buffer.numberOfChannels; c++) {
             const d = buffer.getChannelData(c);
             for (let i = 0; i < d.length; i++) d[i] *= r;
@@ -639,7 +742,7 @@ function applySafety(buffer) {
 }
 
 // ─────────────────────────────────────────────
-// DSP ENGINE
+// DSP ENGINE (기존 로직 유지 — 안정성 보강)
 // ─────────────────────────────────────────────
 async function runLegacyDSP(buffer, chainOrder, presetName) {
     try {
@@ -657,7 +760,7 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
         outNode.connect(warmth);
         outNode = warmth;
 
-        // Pre-gain headroom: Lowered to 0.75 (-2.5dB) for safer filter operations
+        // Pre-gain headroom
         const preGain = off.createGain();
         preGain.gain.value = 0.8;
         outNode.connect(preGain);
@@ -666,7 +769,6 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
         for (const m of chainOrder) {
             if (m === 'match_volume') continue;
 
-            // [FIX #3] opt ID를 올바른 문자열 연산으로 생성 (템플릿 리터럴 내 const 제거)
             const optId = 'opt-' + m.replace(/_/g, '-');
             const optEl = document.getElementById(optId);
             if (!optEl || !optEl.checked) continue;
@@ -679,18 +781,16 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
                 case 'highpass': {
                     const hp = off.createBiquadFilter();
                     hp.type = 'highpass';
-                    // val-highpass는 max=150이므로 Hz 단위로 직접 사용
                     hp.frequency.value = parseFloat(valEl.value);
                     outNode.connect(hp);
                     outNode = hp;
                     break;
                 }
                 case 'multiband': {
-                    // [FIX #7] LR4 필터 쌍 내부 연결 추가 (f1 → f2)
                     const createLR4 = (freq, type) => {
                         const f1 = off.createBiquadFilter(); f1.type = type; f1.frequency.value = freq; f1.Q.value = 0.707;
                         const f2 = off.createBiquadFilter(); f2.type = type; f2.frequency.value = freq; f2.Q.value = 0.707;
-                        f1.connect(f2); // ← 연결 추가
+                        f1.connect(f2);
                         return [f1, f2];
                     };
                     const lP = createLR4(200, 'lowpass');
@@ -702,7 +802,6 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
                     const mC = off.createDynamicsCompressor(); mC.threshold.value = -18; mC.ratio.value = 1.6;
                     const hC = off.createDynamicsCompressor(); hC.threshold.value = -22; hC.ratio.value = 1.4;
                     const mbM = off.createGain();
-                    // Increased compensation (-4.5dB) for safer band summing
                     mbM.gain.value = 0.60;
 
                     outNode.connect(lP[0]); lP[1].connect(lC); lC.connect(mbM);
@@ -729,7 +828,6 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
                     sSh.frequency.value = 6000;
                     sSh.gain.value = v * profile.sr_gain;
                     const sDs = off.createWaveShaper();
-                    // Softer analog saturation curve (Range 1.1 ~ 2.0 for subtle warmth)
                     sDs.curve = makeAnalogSoulCurve(1.1 + (v * 0.9));
                     outNode.connect(sSh);
                     sSh.connect(sDs);
@@ -763,7 +861,6 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
                 }
                 case 'limiter': {
                     const lim = off.createDynamicsCompressor();
-                    // Drive the compressor harder based on lim_mul
                     lim.threshold.value = (-3 - (v * 9)) * (1.0 / (profile.lim_mul + 1e-8));
                     lim.ratio.value     = 10 + (v * 10);
                     lim.knee.value      = 0;
@@ -776,18 +873,16 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
             }
         }
 
-        // --- FINAL GUARD (Internal Brick-wall) ---
+        // FINAL GUARD
         const finalGuard = off.createDynamicsCompressor();
-        finalGuard.threshold.value = -1.0; // Prevent internal node clipping
+        finalGuard.threshold.value = -1.0;
         finalGuard.ratio.value     = 20;
         finalGuard.attack.value    = 0;
         outNode.connect(finalGuard);
         outNode = finalGuard;
 
-        // 안전 클리퍼 — 리미터 이중 적용 방지를 위해 ratio를 낮게 유지
-        // 목적: 절대 클리핑 방지용 안전망일 뿐, 음색에 영향 최소화
         const safetyClipper = off.createDynamicsCompressor();
-        safetyClipper.threshold.value = -0.5;   // 거의 풀스케일에서만 작동
+        safetyClipper.threshold.value = -0.5;
         safetyClipper.ratio.value     = 20;
         safetyClipper.knee.value      = 0;
         safetyClipper.attack.value    = 0.0005;
@@ -800,8 +895,7 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
         let rend = await off.startRendering();
 
         // --- FINAL STAGE: Match Volume & Safety ---
-        
-        // 1. First Pass: Peak Normalize to -0.1dB to keep samples legal
+        // 1. Peak normalize to -0.1dB
         let maxP = 0;
         for (let c = 0; c < rend.numberOfChannels; c++) {
             const d = rend.getChannelData(c);
@@ -818,12 +912,11 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
             }
         }
 
-        // 2. Second Pass: Match Volume (Applied BEFORE final safety)
+        // 2. Match Volume (Peak-aware)
         if (document.getElementById('opt-match-volume').checked) {
             const origRMS = calculateRMS(buffer);
             const rendRMS = calculateRMS(rend);
-            
-            // Peak-aware volume matching
+
             let rendPeak = 0;
             for (let c = 0; c < rend.numberOfChannels; c++) {
                 const d = rend.getChannelData(c);
@@ -832,13 +925,11 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
                     if (a > rendPeak) rendPeak = a;
                 }
             }
-            
+
             let ratio = origRMS / (rendRMS + 1e-8);
-            // If the boost would cause extreme peaking (> 3.0), scale it down
             if (rendPeak * ratio > 2.5) {
                 ratio = 2.5 / rendPeak;
             }
-            // Absolute safety cap
             ratio = Math.min(2.0, ratio);
 
             for (let c = 0; c < rend.numberOfChannels; c++) {
@@ -847,8 +938,7 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
             }
         }
 
-        // 3. Third Pass: Soft-Clip Transients
-        // Gently rounds off any peaks that overshot during volume matching
+        // 3. Soft-Clip Transients
         for (let c = 0; c < rend.numberOfChannels; c++) {
             const d = rend.getChannelData(c);
             for (let i = 0; i < d.length; i++) {
@@ -871,31 +961,8 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
 }
 
 // ─────────────────────────────────────────────
-// STATE
+// FILE INPUT / DROP
 // ─────────────────────────────────────────────
-let aCtx = null;
-let wsO = null, wsR = null;
-let resL = [];
-let currentRecJSON = null;
-let lastF = [];
-
-const domEl = {
-    drop:   document.getElementById('drop-zone'),
-    input:  document.getElementById('audio-file'),
-    name:   document.getElementById('file-name-display'),
-    sub:    document.getElementById('submit-btn'),
-    load:   document.getElementById('loader'),
-    result: document.getElementById('result-area'),
-    oP:     document.getElementById('original-player'),
-    rP:     document.getElementById('restored-player'),
-    dl:     document.getElementById('download-link')
-};
-
-// ─────────────────────────────────────────────
-// FILE INPUT
-// ─────────────────────────────────────────────
-// drop-zone이 <label for='audio-file'>이므로 클릭 핸들러 불필요 (브라우저 네이티브 처리)
-
 domEl.input.addEventListener('change', e => {
     lastF = Array.from(e.target.files);
     domEl.name.textContent = lastF.length + '개 파일 선택됨';
@@ -912,7 +979,7 @@ domEl.drop.addEventListener('drop', e => {
 });
 
 // ─────────────────────────────────────────────
-// FORM SUBMIT  [FIX #1] — onsubmit 단일 정의
+// FORM SUBMIT (이전 결과 정리 추가)
 // ─────────────────────────────────────────────
 document.getElementById('upload-form').addEventListener('submit', async e => {
     e.preventDefault();
@@ -923,6 +990,9 @@ document.getElementById('upload-form').addEventListener('submit', async e => {
     domEl.sub.disabled = true;
 
     try {
+        // 이전 결과 정리
+        await clearAllResults();
+
         if (!aCtx) aCtx = new (window.AudioContext || window.webkitAudioContext)();
         resL = [];
 
@@ -930,17 +1000,18 @@ document.getElementById('upload-form').addEventListener('submit', async e => {
         const presetName = document.getElementById('quality-preset').value;
 
         for (let i = 0; i < lastF.length; i++) {
-            document.getElementById('status-text').textContent = `처리 중: ${i + 1} / ${lastF.length}`;
+            domEl.statusText.textContent = `처리 중: ${i + 1} / ${lastF.length}`;
             const arrayBuf = await lastF[i].arrayBuffer();
-            const audioBuf = await aCtx.decodeAudioData(arrayBuf);
+            const audioBuf = await aCtx.decodeAudioData(arrayBuf).catch(err => { throw new Error('디코딩 실패: ' + (err.message || err)); });
             const restored = await runLegacyDSP(audioBuf, chainModules, presetName);
             const blob = bufferToWave(restored, restored.length);
             const url = URL.createObjectURL(blob);
+            const origUrl = URL.createObjectURL(lastF[i]);
             resL.push({
                 name: lastF[i].name,
                 url,
                 blob,
-                orig: URL.createObjectURL(lastF[i]),
+                orig: origUrl,
                 buffer: restored
             });
         }
@@ -948,11 +1019,10 @@ document.getElementById('upload-form').addEventListener('submit', async e => {
         if (resL.length > 0) {
             renderBatchList();
             await showResult(0);
-            // [FIX #8] ZIP 버튼 표시 (배치 2개 이상)
-            document.getElementById('zip-download-btn').style.display = resL.length > 1 ? 'block' : 'none';
+            domEl.zipBtn.style.display = resL.length > 1 ? 'block' : 'none';
         }
     } catch (err) {
-        alert('처리 중 오류: ' + err.message);
+        alert('처리 중 오류: ' + (err.message || err));
         console.error(err);
     }
 
@@ -961,20 +1031,28 @@ document.getElementById('upload-form').addEventListener('submit', async e => {
 });
 
 // ─────────────────────────────────────────────
-// BATCH LIST
+// BATCH LIST (이벤트 위임으로 변경)
 // ─────────────────────────────────────────────
 function renderBatchList() {
-    document.getElementById('batch-list').innerHTML = resL
+    domEl.batchList.innerHTML = resL
         .map((r, i) => {
             const size = (r.blob.size / 1024 / 1024).toFixed(1) + 'MB';
             return `
-            <li class="batch-item ${i === 0 ? 'active' : ''}" onclick="showResult(${i})">
+            <li class="batch-item ${i === 0 ? 'active' : ''}" data-index="${i}">
                 <span>${r.name}</span>
                 <span class="file-size">${size}</span>
             </li>`;
         })
         .join('');
 }
+
+// 클릭 이벤트 위임
+domEl.batchList.addEventListener('click', e => {
+    const li = e.target.closest('.batch-item');
+    if (!li) return;
+    const idx = Number(li.dataset.index);
+    if (!Number.isNaN(idx)) showResult(idx);
+});
 
 // ─────────────────────────────────────────────
 // WAVESURFER
@@ -1006,18 +1084,17 @@ const formatTime = s => {
 };
 
 // ─────────────────────────────────────────────
-// SHOW RESULT  [FIX #6] — getAI 호출 추가
+// SHOW RESULT (LUFS 전처리 개선 + 안전한 AI 호출)
 // ─────────────────────────────────────────────
 async function showResult(idx) {
     const r = resL[idx];
-    [...document.getElementById('batch-list').children].forEach((el, i) => el.classList.toggle('active', i === idx));
+    [...domEl.batchList.children].forEach((el, i) => el.classList.toggle('active', i === idx));
 
     domEl.result.style.display = 'block';
     
-    // [FIX] 브라우저가 결과 레이아웃을 계산할 시간을 주기 위해 한 프레임 대기
     requestAnimationFrame(async () => {
-        if (wsO) wsO.destroy();
-        if (wsR) wsR.destroy();
+        if (wsO) { try { wsO.destroy(); } catch(e){} wsO = null; }
+        if (wsR) { try { wsR.destroy(); } catch(e){} wsR = null; }
 
         domEl.oP.src = r.orig;
         domEl.rP.src = r.url;
@@ -1026,7 +1103,6 @@ async function showResult(idx) {
         domEl.oP.muted = isRestored;
         domEl.rP.muted = !isRestored;
 
-        // [FIX] Update UI labels initial state
         const oLabel = document.getElementById('mode-original');
         const rLabel = document.getElementById('mode-restored');
         const oStatus = document.getElementById('orig-status');
@@ -1052,14 +1128,13 @@ async function showResult(idx) {
             document.getElementById('time-current').textContent = formatTime(wsO.getCurrentTime());
         });
 
-        // [PORT FROM index.html] Sync timelines on interaction
         wsO.on('interaction', () => { domEl.rP.currentTime = domEl.oP.currentTime; });
         wsR.on('interaction', () => { domEl.oP.currentTime = domEl.rP.currentTime; });
 
         domEl.dl.href = r.url;
         domEl.dl.download = r.name.replace(/\.([^.]+)$/, '_Restored.$1');
 
-        // Metrics
+        // Metrics 계산: 하이패스 전처리 사용 (저주파 과대평가 방지)
         const data = r.buffer.getChannelData(0);
         let sum = 0, peak = 0;
         for (let i = 0; i < data.length; i++) {
@@ -1068,7 +1143,15 @@ async function showResult(idx) {
             if (a > peak) peak = a;
         }
         const rms = Math.sqrt(sum / data.length);
-        let estimatedLUFS = 20 * Math.log10(rms + 1e-12);
+        let estimatedLUFS = -24;
+        try {
+            // 간단 전처리 기반 RMS (근사 LUFS)
+            const filteredRms = rmsWithHighpass(r.buffer, 100);
+            estimatedLUFS = 20 * Math.log10(filteredRms + 1e-12);
+        } catch (e) {
+            estimatedLUFS = 20 * Math.log10(rms + 1e-12);
+        }
+
         const crest = peak / (rms + 1e-12);
         estimatedLUFS -= Math.min(6, (crest - 3) * 0.8);
         estimatedLUFS = Number.isFinite(estimatedLUFS) ? Math.max(-60, Math.min(0, estimatedLUFS)) : -24;
@@ -1086,13 +1169,13 @@ async function showResult(idx) {
         document.getElementById('metric-crest').textContent = metrics.crest;
         document.getElementById('metric-phase').textContent = metrics.phase;
 
-        // [FIX #6] AI 분석 호출
+        // AI 분석 호출 (안전)
         await getAI(metrics);
     });
 }
 
 // ─────────────────────────────────────────────
-// AI (GROQ)
+// AI (GROQ) — 응답 JSON 블록 추출 및 안전 파싱
 // ─────────────────────────────────────────────
 function clampDSP(name, value) {
     const n = Number(value);
@@ -1111,9 +1194,9 @@ function clampDSP(name, value) {
 
 async function getAI(metrics) {
     const key = (localStorage.getItem('groq_api_key') || '').trim();
-    const fbEl     = document.getElementById('ai-feedback-text');
-    const recList  = document.getElementById('ai-rec-list');
-    const applyBtn = document.getElementById('apply-ai-btn');
+    const fbEl     = domEl.aiFeedback;
+    const recList  = domEl.aiRecList;
+    const applyBtn = domEl.applyAiBtn;
 
     currentRecJSON = null;
 
@@ -1154,9 +1237,16 @@ REQUIRED JSON KEYS: "advice", "multiband", "punchy_bass", "super_res", "brillian
 
         const data = await response.json();
         if (!response.ok) throw new Error(data?.error?.message || `HTTP ${response.status}`);
-        if (!data?.choices?.[0]?.message?.content) throw new Error('Empty AI response');
 
-        const parsed = JSON.parse(data.choices[0].message.content.trim());
+        const raw = data?.choices?.[0]?.message?.content || '';
+        // JSON 블록 추출
+        const match = raw.match(/\{[\s\S]*\}/);
+        let parsed;
+        try {
+            parsed = JSON.parse(match ? match[0] : raw);
+        } catch (err) {
+            throw new Error('AI 응답을 파싱할 수 없습니다. 응답 내용: ' + (raw.slice(0, 500)));
+        }
 
         const safe = {
             multiband:  clampDSP('multiband',  parsed.multiband),
@@ -1191,7 +1281,7 @@ REQUIRED JSON KEYS: "advice", "multiband", "punchy_bass", "super_res", "brillian
 }
 
 // ─────────────────────────────────────────────
-// PLAYBACK CONTROLS
+// PLAYBACK & UI CONTROLS
 // ─────────────────────────────────────────────
 document.getElementById('master-play-btn').addEventListener('click', () => {
     const btn = document.getElementById('master-play-btn');
@@ -1200,12 +1290,10 @@ document.getElementById('master-play-btn').addEventListener('click', () => {
         domEl.rP.pause();
         btn.textContent = '▶';
     } else {
-        // [SAFETY] Enforce current A/B state before playing
         const isR = document.getElementById('ab-toggle-btn').classList.contains('restored');
         domEl.oP.muted = isR;
         domEl.rP.muted = !isR;
 
-        // Sync before play
         domEl.rP.currentTime = domEl.oP.currentTime;
         domEl.oP.play();
         domEl.rP.play();
@@ -1217,7 +1305,6 @@ document.getElementById('ab-toggle-btn').addEventListener('click', () => {
     const btn = document.getElementById('ab-toggle-btn');
     const isR = btn.classList.toggle('restored');
     
-    // UI Update
     const oLabel = document.getElementById('mode-original');
     const rLabel = document.getElementById('mode-restored');
     const oStatus = document.getElementById('orig-status');
@@ -1233,18 +1320,16 @@ document.getElementById('ab-toggle-btn').addEventListener('click', () => {
         rStatus.style.color = isR ? 'var(--accent)' : 'var(--text-muted)';
     }
     
-    // [STRICT ENFORCEMENT] Ensure only one is audible
     domEl.oP.muted = isR;
     domEl.rP.muted = !isR;
     
-    // Double check to prevent simultaneous playback leakage
     if (domEl.oP.muted) domEl.oP.volume = 0; else domEl.oP.volume = 1;
     if (domEl.rP.muted) domEl.rP.volume = 0; else domEl.rP.volume = 1;
 });
 
-// [FIX #9] apply-ai-btn — el 변수명 충돌 해결 (rangeEl로 명명)
-document.getElementById('apply-ai-btn').addEventListener('click', () => {
-    if (!currentRecJSON || !document.getElementById('apply-ai-btn').classList.contains('ready')) return;
+// apply AI recommendations (cached applyAiBtn used)
+domEl.applyAiBtn.addEventListener('click', () => {
+    if (!currentRecJSON || !domEl.applyAiBtn.classList.contains('ready')) return;
     Object.entries(currentRecJSON).forEach(([k, v]) => {
         const rangeEl = document.getElementById('val-' + k.replace(/_/g, '-'));
         if (rangeEl) {
@@ -1255,11 +1340,11 @@ document.getElementById('apply-ai-btn').addEventListener('click', () => {
 });
 
 // ─────────────────────────────────────────────
-// ZIP DOWNLOAD  [FIX #8] — 이벤트 리스너 연결
+// ZIP DOWNLOAD (임시 URL 해제 추가)
 // ─────────────────────────────────────────────
-document.getElementById('zip-download-btn').addEventListener('click', async () => {
+domEl.zipBtn.addEventListener('click', async () => {
     if (resL.length === 0) return;
-    const btn = document.getElementById('zip-download-btn');
+    const btn = domEl.zipBtn;
     btn.textContent = '⏳ ZIP 생성 중...';
     btn.disabled = true;
     try {
@@ -1269,19 +1354,34 @@ document.getElementById('zip-download-btn').addEventListener('click', async () =
             zip.file(r.name.replace(/\.([^.]+)$/, '_Restored.wav'), ab);
         }
         const content = await zip.generateAsync({ type: 'blob' });
+        const zipUrl = URL.createObjectURL(content);
         const a = document.createElement('a');
-        a.href = URL.createObjectURL(content);
+        a.href = zipUrl;
         a.download = 'AnalogSoul_Batch.zip';
         a.click();
+        // 안전하게 임시 URL 해제 (약간 여유 시간)
+        setTimeout(() => {
+            try { URL.revokeObjectURL(zipUrl); } catch (e) { console.warn('revoke zip url', e); }
+        }, 30000);
     } catch (err) {
-        alert('ZIP 생성 오류: ' + err.message);
+        alert('ZIP 생성 오류: ' + (err.message || err));
     }
     btn.textContent = '📦 BATCH ZIP DOWNLOAD';
     btn.disabled = false;
 });
 
+// 개별 다운로드 링크 클릭 뒤 임시 URL 해제 (유저가 다운로드한 뒤 일정 시간 뒤)
+domEl.dl.addEventListener('click', () => {
+    const href = domEl.dl.href;
+    setTimeout(() => {
+        try {
+            if (href && href.startsWith('blob:')) URL.revokeObjectURL(href);
+        } catch (e) { /* ignore */ }
+    }, 15000);
+});
+
 // ─────────────────────────────────────────────
-// WAV ENCODER
+// WAV ENCODER (디더 + 반올림 개선)
 // ─────────────────────────────────────────────
 function bufferToWave(ab, l) {
     const n = ab.numberOfChannels;
@@ -1297,8 +1397,12 @@ function bufferToWave(ab, l) {
     s32(0x61746164); s32(len - 44);
     for (let i = 0; i < l; i++) {
         for (let c = 0; c < n; c++) {
-            const sample = Math.max(-1, Math.min(1, ab.getChannelData(c)[i]));
-            s16(sample < 0 ? sample * 0x8000 : sample * 0x7fff);
+            // 트라이앵귤러 디더 (간단 구현)
+            const dither = (Math.random() - Math.random()) * (1 / 32768);
+            let sample = ab.getChannelData(c)[i] + dither;
+            sample = Math.max(-1, Math.min(1, sample));
+            const int16 = sample < 0 ? Math.round(sample * 0x8000) : Math.round(sample * 0x7FFF);
+            s16(int16);
         }
     }
     return new Blob([buffer], { type: 'audio/wav' });
@@ -1321,8 +1425,7 @@ document.getElementById('modal-save').addEventListener('click', () => {
 });
 
 // ─────────────────────────────────────────────
-// INIT — script가 </body> 직전이므로 DOM 이미 존재
-// DOMContentLoaded는 이미 발화 완료 후라 콜백 실행 안 됨 → 직접 실행
+// INIT
 // ─────────────────────────────────────────────
 applyPreset(document.getElementById('quality-preset').value);
 
