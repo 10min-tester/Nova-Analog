@@ -269,12 +269,17 @@
         <div class="preset-row" style="margin-top:16px;">
             <label style="font-size:0.85rem;color:var(--text-muted);font-weight:700;">PRESET <span class="offline-badge">Pure-Match Active</span></label>
             <select id="quality-preset">
-                <option value="music_balanced" selected>음악 밸런스 (표준)</option>
-                <option value="voice_clean">깨끗한 음성 (보컬용)</option>
-                <option value="podcast_pro">팟캐스트 프로 (방송급)</option>
-                <option value="compressed_repair">압축 음원 복구 (저음질용)</option>
-                <option value="asmr_field">ASMR / 현장 녹음 (초고해상도)</option>
-            </select>
+    <option value="music_balanced" selected>음악 밸런스 (표준)</option>
+    <option value="voice_clean">깨끗한 음성 (보컬용)</option>
+    <option value="podcast_pro">팟캐스트 프로 (방송급)</option>
+    <option value="compressed_repair">압축 음원 복구 (저음질용)</option>
+    <option value="asmr_field">ASMR / 현장 녹음 (초고해상도)</option>
+    <optgroup label="━━━ 저음질 복원 ━━━">
+        <option value="lowfi_restore">💾 저음질 음원 복원</option>
+        <option value="telephone_clarity">☎️ 전화음질 → 명확한 음성</option>
+        <option value="vinyl_digital">💿 LP / 카세트 디지털화</option>
+    </optgroup>
+</select>
         </div>
 
         <div class="options-grid" id="dsp-chain">
@@ -450,15 +455,30 @@ const PRESET_MAP = {
     asmr_field: {
         vals: { "opt-highpass": true, "val-highpass": 30, "opt-multiband": true, "val-multiband": 45, "opt-punchy-bass": false, "val-punchy-bass": 0, "opt-super-res": true, "val-super-res": 80, "opt-brilliance": true, "val-brilliance": 70, "opt-stereo": true, "val-stereo": 80, "opt-limiter": true, "val-limiter": 40, "opt-match-volume": true },
         order: ["highpass","multiband","super_res","brilliance","stereo","limiter"]
+    },
+    lowfi_restore: {
+        vals: { "opt-highpass": true, "val-highpass": 120, "opt-multiband": true, "val-multiband": 65, "opt-punchy-bass": false, "val-punchy-bass": 0, "opt-super-res": true, "val-super-res": 75, "opt-brilliance": true, "val-brilliance": 55, "opt-stereo": false, "val-stereo": 0, "opt-limiter": true, "val-limiter": 35, "opt-match-volume": true },
+        order: ["highpass","multiband","super_res","brilliance","limiter"]
+    },
+    telephone_clarity: {
+        vals: { "opt-highpass": true, "val-highpass": 140, "opt-multiband": true, "val-multiband": 80, "opt-punchy-bass": false, "val-punchy-bass": 0, "opt-super-res": true, "val-super-res": 85, "opt-brilliance": true, "val-brilliance": 70, "opt-stereo": false, "val-stereo": 0, "opt-limiter": true, "val-limiter": 30, "opt-match-volume": true },
+        order: ["highpass","multiband","super_res","brilliance","limiter"]
+    },
+    vinyl_digital: {
+        vals: { "opt-highpass": true, "val-highpass": 60, "opt-multiband": true, "val-multiband": 50, "opt-punchy-bass": true, "val-punchy-bass": 20, "opt-super-res": true, "val-super-res": 60, "opt-brilliance": true, "val-brilliance": 40, "opt-stereo": true, "val-stereo": 70, "opt-limiter": true, "val-limiter": 45, "opt-match-volume": true },
+        order: ["highpass","multiband","super_res","brilliance","stereo","limiter"]
     }
 };
 
 const PROFILES = {
     music_balanced:  { sr_gain: 2.5, br_gain: 3.0, pb_gain: 2.5, st_mul: 0.9, lim_mul: 0.92, warmth: 1.2 },
-    voice_clean:     { sr_gain: 1.2, br_gain: 0,   pb_gain: 0,   st_mul: 0.7, lim_mul: 0.85, warmth: 0.6 },
-    compressed_repair:{ sr_gain: 3.8, br_gain: 4.5, pb_gain: 4.0, st_mul: 0.8, lim_mul: 0.88, warmth: 1.8 },
-    podcast_pro:     { sr_gain: 1.8, br_gain: 0,   pb_gain: 0,   st_mul: 0.6, lim_mul: 0.82, warmth: 1.0 },
-    asmr_field:      { sr_gain: 4.2, br_gain: 4.2, pb_gain: 0,   st_mul: 1.1, lim_mul: 0.90, warmth: 0.8 }
+    voice_clean:     { sr_gain: 2.0, br_gain: 1.5, pb_gain: 0,   st_mul: 0.3, lim_mul: 0.88, warmth: 0.5 },
+    podcast_pro:     { sr_gain: 3.5, br_gain: 4.0, pb_gain: 0,   st_mul: 0.7, lim_mul: 0.85, warmth: 0.8 },
+    compressed_repair: { sr_gain: 3.8, br_gain: 4.5, pb_gain: 4.0, st_mul: 0.8, lim_mul: 0.88, warmth: 1.8 },
+    asmr_field:      { sr_gain: 4.0, br_gain: 4.2, pb_gain: 0,   st_mul: 0.85, lim_mul: 0.90, warmth: 1.0 },
+    lowfi_restore:   { sr_gain: 4.2, br_gain: 4.8, pb_gain: 0,   st_mul: 0.5, lim_mul: 0.80, warmth: 0.5 },
+    telephone_clarity: { sr_gain: 4.5, br_gain: 5.0, pb_gain: 0,   st_mul: 0.3, lim_mul: 0.75, warmth: 0.3 },
+    vinyl_digital:   { sr_gain: 3.0, br_gain: 3.5, pb_gain: 2.0, st_mul: 0.85, lim_mul: 0.90, warmth: 1.5 }
 };
 
 const SAFETY_THRESHOLDS = {
