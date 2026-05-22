@@ -407,14 +407,15 @@
     </header>
 
     <form id="upload-form" class="main-card">
-        <label class="upload-area" id="drop-zone" for="audio-file">
-            <input type="file" id="audio-file" accept="audio/*" multiple style="display:none;">
+        <div class="upload-area" id="drop-zone" style="position:relative;">
+            <input type="file" id="audio-file" accept="audio/*" multiple
+                style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:2;font-size:0;">
             <div class="icon-container">
                 <svg viewBox="0 0 24 24"><path d="M12 3v13m0-13l-4 4m4-4l4 4m-8 9h8c1.1 0 2-.9 2-2v-2H6v2c0 1.1.9 2 2 2z" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"/></svg>
             </div>
             <div id="file-name-display">NOVA CORE IS READY</div>
             <div class="upload-hint">DRAG & DROP AUDIO TO START THE PROCESS</div>
-        </label>
+        </div>
 
         <!-- 실시간 프리뷰 랙 구조 (오디오 업로드 시 노출됨) -->
         <div class="preview-rack" id="preview-rack">
@@ -1356,6 +1357,16 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
         const profile = PROFILES[presetName] || PROFILES.music_balanced;
         let outNode = source;
 
+        // [지능형 게인 스테이징] RMS 기반 자동 헤드룸 계산
+        const rms = calculateRMS(buffer); 
+        const targetRms = 0.2; 
+        const autoGain = Math.min(1.2, targetRms / (rms + 0.001)); 
+
+        const inputGain = off.createGain();
+        inputGain.gain.value = autoGain;
+        source.connect(inputGain);
+        outNode = inputGain;
+
         // Warmth shelf
         const warmth = off.createBiquadFilter();
         warmth.type = 'lowshelf';
@@ -1379,7 +1390,7 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
 
             const valId = 'val-' + m.replace(/_/g, '-');
             const valEl = document.getElementById(valId);
-            const v = valEl ? parseFloat(valEl.value) / 100.0 : 0.5;
+            const val = valEl ? parseFloat(valEl.value) / 100.0 : 0.5;
 
             switch (m) {
                 case 'highpass': {
@@ -1391,85 +1402,82 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
                     break;
                 }
                 case 'multiband': {
-    const createLR4 = (freq, type) => {
-        const f1 = ctx.createBiquadFilter(); f1.type = type; f1.frequency.value = freq; f1.Q.value = 0.707;
-        const f2 = ctx.createBiquadFilter(); f2.type = type; f2.frequency.value = freq; f2.Q.value = 0.707;
-        f1.connect(f2);
-        return [f1, f2];
-    };
-    const lP = createLR4(320, 'lowpass');
-    const hP = createLR4(3200, 'highpass');
-    const mP1 = createLR4(320, 'highpass');
-    const mP2 = createLR4(3200, 'lowpass');
+                    const createLR4 = (freq, type) => {
+                        const f1 = off.createBiquadFilter(); f1.type = type; f1.frequency.value = freq; f1.Q.value = 0.707;
+                        const f2 = off.createBiquadFilter(); f2.type = type; f2.frequency.value = freq; f2.Q.value = 0.707;
+                        f1.connect(f2);
+                        return [f1, f2];
+                    };
+                    const lP = createLR4(320, 'lowpass');
+                    const hP = createLR4(3200, 'highpass');
+                    const mP1 = createLR4(320, 'highpass');
+                    const mP2 = createLR4(3200, 'lowpass');
 
-    // 고정 상수를 전면 제거하고 PROFILES 프리셋 설정값과 동적 연동
-    const lC = ctx.createDynamicsCompressor(); 
-    lC.threshold.value = profile.comp_thresh; 
-    lC.ratio.value = profile.comp_ratio; 
-    lC.attack.value = profile.comp_attack;
-    lC.release.value = profile.comp_release;
+                    const lC = off.createDynamicsCompressor(); 
+                    lC.threshold.value = profile.comp_thresh || -12; 
+                    lC.ratio.value = profile.comp_ratio || 2; 
+                    lC.attack.value = profile.comp_attack || 0.03;
+                    lC.release.value = 0.20; // 저역 펀치감 보존
 
-    const mC = ctx.createDynamicsCompressor(); 
-    mC.threshold.value = profile.comp_thresh + 2; // 대역별 릴레이션 오프셋 마진 유지
-    mC.ratio.value = Math.max(1.2, profile.comp_ratio - 0.4);
-    mC.attack.value = profile.comp_attack;
-    mC.release.value = profile.comp_release;
+                    const mC = off.createDynamicsCompressor(); 
+                    mC.threshold.value = (profile.comp_thresh || -12) + 2; 
+                    mC.ratio.value = Math.max(1.2, (profile.comp_ratio || 2) - 0.4);
+                    mC.attack.value = profile.comp_attack || 0.03;
+                    mC.release.value = 0.10; // 중역 보컬 명료도
 
-    const hC = ctx.createDynamicsCompressor(); 
-    hC.threshold.value = profile.comp_thresh - 2; 
-    hC.ratio.value = Math.max(1.1, profile.comp_ratio - 0.6);
-    hC.attack.value = profile.comp_attack;
-    hC.release.value = profile.comp_release;
+                    const hC = off.createDynamicsCompressor(); 
+                    hC.threshold.value = (profile.comp_thresh || -12) - 2; 
+                    hC.ratio.value = Math.max(1.1, (profile.comp_ratio || 2) - 0.6);
+                    hC.attack.value = profile.comp_attack || 0.03;
+                    hC.release.value = 0.05; // 고역 팅글 극대화
 
-    const mbM = ctx.createGain();
-    mbM.gain.value = 0.7;
+                    const mbM = off.createGain();
+                    mbM.gain.value = 0.85; // 대역 합산 효율 최적화
 
-    activeGain.connect(lP[0]); lP[1].connect(lC); lC.connect(mbM);
-    activeGain.connect(hP[0]); hP[1].connect(hC); hC.connect(mbM);
-    activeGain.connect(mP1[0]); mP1[1].connect(mP2[0]); mP2[1].connect(mC); mC.connect(mbM);
-    mbM.connect(moduleOutput);
-    nodeRef = { lC, mC, hC };
-    break;
-}
+                    outNode.connect(lP[0]); lP[1].connect(lC); lC.connect(mbM);
+                    outNode.connect(hP[0]); hP[1].connect(hC); hC.connect(mbM);
+                    outNode.connect(mP1[0]); mP1[1].connect(mP2[0]); mP2[1].connect(mC); mC.connect(mbM);
+
+                    const postMbGain = off.createGain();
+                    postMbGain.gain.value = 1.0;
+                    mbM.connect(postMbGain);
+                    outNode = postMbGain;
+                    break;
+                }
                 case 'punchy_bass': {
-    const pb = ctx.createBiquadFilter();
-    pb.type = 'peaking';
-    pb.frequency.value = 90;
-    
-    // [동적 연동 반영] startPreview와 완전히 동일하게 매핑
-    const currentPbGain = profile.pb_gain > 0 ? profile.pb_gain : 0;
-    pb.gain.value = (val + currentPbGain) * 12;
-    
-    activeGain.connect(pb);
-    pb.connect(moduleOutput);
-    nodeRef = pb;
-    break;
-}
+                    const pb = off.createBiquadFilter();
+                    pb.type = 'peaking';
+                    pb.frequency.value = 90;
+                    
+                    const currentPbGain = profile.pb_gain > 0 ? profile.pb_gain : 0;
+                    const normalizedGain = (val + currentPbGain) * 12;
+                    pb.gain.value = Math.min(normalizedGain, 18); // 피크 오버슈트 방지
+                    pb.Q.value = 0.7 + (normalizedGain / 20); // 가변 Q-Factor 적용
+                    
+                    outNode.connect(pb);
+                    outNode = pb;
+                    break;
+                }
                 case 'super_res': {
-                    // 고주파 하모닉 익사이터 병렬 결합 연동
-                    const exciter = createHarmonicExciterNode(off, v, profile);
+                    const exciter = createHarmonicExciterNode(off, val, profile);
                     outNode.connect(exciter.input);
                     outNode = exciter.output;
                     break;
                 }
                 case 'brilliance': {
-    const br = ctx.createBiquadFilter();
-    br.type = 'highshelf';
-    br.frequency.value = 9500;
-    
-    // [동적 연동 반영] startPreview와 완전히 동일하게 매핑
-    const currentBrGain = profile.br_gain > 0 ? profile.br_gain : 0;
-    br.gain.value = (val + currentBrGain) * 15;
-    
-    activeGain.connect(br);
-    br.connect(moduleOutput);
-    nodeRef = br;
-    break;
-}
+                    const br = off.createBiquadFilter();
+                    br.type = 'highshelf';
+                    br.frequency.value = 9500;
+                    const currentBrGain = profile.br_gain > 0 ? profile.br_gain : 0;
+                    br.gain.value = Math.min((val + currentBrGain) * 15, 18);
+                    
+                    outNode.connect(br);
+                    outNode = br;
+                    break;
+                }
                 case 'stereo': {
                     if (buffer.numberOfChannels >= 2) {
-                        // Mid/Side 스테레오 와이드너 연동 (모노 호환)
-                        const widener = createMSWidenerNode(off, v, profile);
+                        const widener = createMSWidenerNode(off, val, profile);
                         outNode.connect(widener.input);
                         outNode = widener.output;
                     }
@@ -1478,11 +1486,11 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
                 case 'limiter': {
                     const limOffset = (1.0 - profile.lim_mul) * 20;
                     const lim = off.createDynamicsCompressor();
-                    lim.threshold.value = -3 - (v * 9) - limOffset;
-                    lim.ratio.value     = 10 + (v * 10);
+                    lim.threshold.value = -3 - (val * 9) - limOffset;
+                    lim.ratio.value     = 10 + (val * 10);
                     lim.knee.value      = 2;
                     lim.attack.value    = 0;
-                    lim.release.value   = 0.05 + (v * 0.05);
+                    lim.release.value   = 0.05 + (val * 0.05);
                     outNode.connect(lim);
                     outNode = lim;
                     break;
@@ -1490,9 +1498,9 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
             }
         }
 
-        // 마스터 출력 노드 감쇄
+        // 마스터 출력 노드 감쇄 및 안전 마진
         const outGain = off.createGain();
-        outGain.gain.value = 0.85;
+        outGain.gain.value = 0.92;
         outNode.connect(outGain);
         outNode = outGain;
 
@@ -1501,16 +1509,24 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
         
         let rend = await off.startRendering();
 
-        // 렌더링 직후 정밀 소프트 클리퍼 (tanh 커브 0.85)
+        // [최종 안전장치] 렌더링 직후 정밀 tanh 소프트 클리퍼 및 하드 실링
         for (let c = 0; c < rend.numberOfChannels; c++) {
-            const d = rend.getChannelData(c);
-            for (let i = 0; i < d.length; i++) {
-                const x = d[i];
-                const threshold = 0.85;
-                if (Math.abs(x) > threshold) {
-                    d[i] = Math.sign(x) * (threshold + (1 - threshold) *
-                        Math.tanh((Math.abs(x) - threshold) / (1 - threshold)));
+            const data = rend.getChannelData(c);
+            for (let i = 0; i < data.length; i++) {
+                let s = data[i];
+
+                // 1. tanh 소프트 클리핑 (0.85 임계값 부드러운 곡선 압축)
+                const thresh = 0.85;
+                if (Math.abs(s) > thresh) {
+                    s = Math.sign(s) * (thresh + (1.0 - thresh) * Math.tanh((Math.abs(s) - thresh) / (1.0 - thresh)));
                 }
+
+                // 2. 최종 마스터 실링 (0.988 초과 원천 방어)
+                if (Math.abs(s) > 0.988) {
+                    s = Math.sign(s) * 0.988;
+                }
+
+                data[i] = s;
             }
         }
 
@@ -1994,7 +2010,15 @@ function renderPreBatchList(files) {
 domEl.drop.addEventListener('dragover', e => e.preventDefault());
 domEl.drop.addEventListener('drop', async e => {
     e.preventDefault();
-    lastF = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('audio/'));
+    const allFiles = Array.from(e.dataTransfer.files);
+    lastF = allFiles.filter(f => f.type.startsWith('audio/'));
+
+    if (allFiles.length > 0 && lastF.length === 0) {
+        domEl.name.textContent = '⚠️ 오디오 파일만 지원됩니다 (mp3, wav, flac 등)';
+        domEl.sub.disabled = true;
+        return;
+    }
+
     domEl.name.textContent = lastF.length + '개 파일 선택됨';
     domEl.sub.disabled = lastF.length === 0;
 
