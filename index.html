@@ -684,14 +684,14 @@ const PRESET_MAP = {
 };
 
 const PROFILES = {
-    music_balanced:  { sr_gain: 2.5, br_gain: 3.0, pb_gain: 2.5, st_mul: 0.9, lim_mul: 0.92, warmth: 1.2 },
-    voice_clean:     { sr_gain: 2.0, br_gain: 1.5, pb_gain: 0,   st_mul: 0.3, lim_mul: 0.88, warmth: 0.5 },
-    podcast_pro:     { sr_gain: 3.5, br_gain: 4.0, pb_gain: 0,   st_mul: 0.7, lim_mul: 0.85, warmth: 0.8 },
-    compressed_repair: { sr_gain: 3.8, br_gain: 4.5, pb_gain: 4.0, st_mul: 0.8, lim_mul: 0.88, warmth: 1.8 },
-    asmr_field:      { sr_gain: 4.0, br_gain: 4.2, pb_gain: 0,   st_mul: 0.85, lim_mul: 0.90, warmth: 1.0 },
-    lowfi_restore:   { sr_gain: 4.2, br_gain: 4.8, pb_gain: 0,   st_mul: 0.5, lim_mul: 0.80, warmth: 0.5 },
-    telephone_clarity: { sr_gain: 4.5, br_gain: 5.0, pb_gain: 0,   st_mul: 0.3, lim_mul: 0.75, warmth: 0.3 },
-    vinyl_digital:   { sr_gain: 3.0, br_gain: 3.5, pb_gain: 2.0, st_mul: 0.85, lim_mul: 0.90, warmth: 1.5 }
+    music_balanced:    { sr_gain: 2.5, br_gain: 3.0, pb_gain: 2.5, st_mul: 0.9,  lim_mul: 0.92, warmth: 1.2, comp_thresh: -18, comp_ratio: 2.5, comp_attack: 0.01, comp_release: 0.15 },
+    voice_clean:       { sr_gain: 2.0, br_gain: 1.5, pb_gain: 0,   st_mul: 0.3,  lim_mul: 0.88, warmth: 0.5, comp_thresh: -20, comp_ratio: 3.0, comp_attack: 0.005,comp_release: 0.10 },
+    podcast_pro:       { sr_gain: 3.5, br_gain: 4.0, pb_gain: 0,   st_mul: 0.7,  lim_mul: 0.85, warmth: 0.8, comp_thresh: -22, comp_ratio: 3.5, comp_attack: 0.008,comp_release: 0.12 },
+    compressed_repair: { sr_gain: 3.8, br_gain: 4.5, pb_gain: 4.0, st_mul: 0.8,  lim_mul: 0.88, warmth: 1.8, comp_thresh: -15, comp_ratio: 2.0, comp_attack: 0.015,comp_release: 0.20 },
+    asmr_field:        { sr_gain: 4.0, br_gain: 4.2, pb_gain: 0,   st_mul: 0.85, lim_mul: 0.90, warmth: 1.0, comp_thresh: -24, comp_ratio: 1.8, comp_attack: 0.02, comp_release: 0.25 },
+    lowfi_restore:     { sr_gain: 4.2, br_gain: 4.8, pb_gain: 0,   st_mul: 0.5,  lim_mul: 0.80, warmth: 0.5, comp_thresh: -16, comp_ratio: 2.2, comp_attack: 0.01, comp_release: 0.18 },
+    telephone_clarity: { sr_gain: 4.5, br_gain: 5.0, pb_gain: 0,   st_mul: 0.3,  lim_mul: 0.75, warmth: 0.3, comp_thresh: -20, comp_ratio: 4.0, comp_attack: 0.005,comp_release: 0.08 },
+    vinyl_digital:     { sr_gain: 3.0, br_gain: 3.5, pb_gain: 2.0, st_mul: 0.85, lim_mul: 0.90, warmth: 1.5, comp_thresh: -17, comp_ratio: 2.3, comp_attack: 0.012,comp_release: 0.16 }
 };
 
 const SAFETY_THRESHOLDS = {
@@ -749,7 +749,7 @@ const domEl = {
     dl:         document.getElementById('download-link'),
     statusText: document.getElementById('status-text'),
     applyAiBtn: document.getElementById('apply-ai-btn'),
-applyAiAllBtn: document.getElementById('apply-ai-all-btn'),
+    applyAiAllBtn: document.getElementById('apply-ai-all-btn'),
 
     aiFeedback: document.getElementById('ai-feedback-text'),
     aiRecList:  document.getElementById('ai-rec-list'),
@@ -2041,20 +2041,23 @@ domEl.previewPlayBtn.addEventListener('click', () => {
 // ─────────────────────────────────────────────
 document.getElementById('upload-form').addEventListener('submit', async e => {
     e.preventDefault();
-    if (lastF.length === 0) return;
+    console.log('[SUBMIT] 이벤트 발화, lastF:', lastF.length);
+    if (lastF.length === 0) { console.log('[SUBMIT] lastF 비어있음, 중단'); return; }
 
     domEl.load.classList.add('centered');
     domEl.load.style.display = 'block';
     domEl.result.style.display = 'none';
     domEl.sub.disabled = true;
 
-    // 실시간 프리뷰 강제 정지
     stopPreview();
 
     try {
+        console.log('[SUBMIT] clearAllResults 시작');
         await clearAllResults();
+        console.log('[SUBMIT] clearAllResults 완료');
 
         if (!aCtx) aCtx = new (window.AudioContext || window.webkitAudioContext)();
+        console.log('[SUBMIT] aCtx 상태:', aCtx.state);
         resL = [];
 
         const chainModules = [...dspChain.querySelectorAll('.toggle-container')].map(el => el.dataset.module);
@@ -2062,13 +2065,17 @@ document.getElementById('upload-form').addEventListener('submit', async e => {
 
         for (let i = 0; i < lastF.length; i++) {
             domEl.statusText.textContent = `처리 중: ${i + 1} / ${lastF.length}`;
+            console.log(`[SUBMIT] 파일 ${i+1}/${lastF.length} 처리 시작:`, lastF[i].name);
             const arrayBuf = await lastF[i].arrayBuffer();
+            console.log(`[SUBMIT] arrayBuffer 완료, aCtx 상태:`, aCtx.state);
             const audioBuf = await aCtx.decodeAudioData(arrayBuf).catch(err => { throw new Error('디코딩 실패: ' + (err.message || err)); });
+            console.log(`[SUBMIT] decodeAudioData 완료`);
 
-            // 프리뷰용 캐시 보존
             if (i === 0) previewState.buffer = audioBuf;
 
+            console.log(`[SUBMIT] runLegacyDSP 시작`);
             const restored = await runLegacyDSP(audioBuf, chainModules, presetName);
+            console.log(`[SUBMIT] runLegacyDSP 완료`);
             const blob = bufferToWave(restored, restored.length);
             const url = URL.createObjectURL(blob);
             const origUrl = URL.createObjectURL(lastF[i]);
@@ -2429,26 +2436,6 @@ document.getElementById('ab-toggle-btn').addEventListener('click', () => {
     
     if (domEl.oP.muted) domEl.oP.volume = 0; else domEl.oP.volume = 1;
     if (domEl.rP.muted) domEl.rP.volume = 0; else domEl.rP.volume = 1;
-});
-
-// AI 추천 튜닝값 슬라이더에 반영 후 즉시 마스터링 시작
-domEl.applyAiBtn.addEventListener('click', () => {
-    if (!currentRecJSON || !domEl.applyAiBtn.classList.contains('ready')) return;
-    Object.entries(currentRecJSON).forEach(([k, v]) => {
-        const rangeEl = document.getElementById('val-' + k.replace(/_/g, '-'));
-        if (rangeEl) {
-            rangeEl.value = Math.min(100, Math.max(0, v));
-            updateSafetyUI(rangeEl);
-        }
-    });
-    // 즉시 마스터링을 진행할 것이므로 재생 중인 실시간 프리뷰는 정지
-    if (previewState.isPlaying) {
-        stopPreview();
-    }
-    // 고품질 마스터링 시작 버튼을 자동으로 클릭하여 즉시 진행
-    if (domEl.sub && !domEl.sub.disabled) {
-        domEl.sub.click();
-    }
 });
 
 // 레인지 노브 변경 리스너 전체 바인딩
