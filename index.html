@@ -8,14 +8,17 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/wavesurfer.js@7"></script>
+    <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+  <!-- SoX (GPL-2.0) — 오프라인 고품질 리샘플, 최초 1회 WASM 로드 -->
+    <script src="https://cdn.jsdelivr.net/gh/rameshvarun/sox-emscripten@v0.1.0/build/sox.js" defer></script>
     <style>
         :root {
             --bg: #030408; 
             --surface: rgba(10, 12, 22, 0.75); 
             --surface2: rgba(22, 28, 45, 0.5); 
             --border: rgba(255, 255, 255, 0.08);
-            --accent: #00f0ff; /* 선명한 네온 시안 */
-            --accent-glow: rgba(0, 240, 255, 0.25);
+            --accent: #4fd6e3;
+            --accent-glow: rgba(79, 214, 227, 0.22);
             --accent2: #8b5cf6; /* 바이올렛 네온 */
             --accent2-glow: rgba(139, 92, 246, 0.25);
             --text: #f8fafc; 
@@ -37,8 +40,12 @@
                 radial-gradient(circle at 95% 95%, rgba(0, 240, 255, 0.08) 0%, transparent 40%);
             color: var(--text); 
             font-family: var(--font); 
-            min-height: 100vh; 
-            padding: 40px 20px 80px; 
+            min-height: 100vh;
+            min-height: 100dvh;
+            padding: 40px 20px 80px;
+            padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+            padding-left: max(20px, env(safe-area-inset-left, 0px));
+            padding-right: max(20px, env(safe-area-inset-right, 0px));
             overflow-x: hidden;
         }
 
@@ -248,15 +255,15 @@
         #quality-preset:hover { border-color: rgba(255,255,255,0.15); }
 
         .options-grid { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; }
-        .toggle-container { display: flex; align-items: center; justify-content: space-between; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 18px; transition: 0.3s; position: relative; }
+        .toggle-container { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 18px; transition: 0.3s; position: relative; }
         .toggle-container.warning-bg { background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.25); }
         .toggle-container.danger-bg { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.35); }
         
-        .toggle-left-side { display: flex; align-items: center; gap: 12px; flex: 1; }
+        .toggle-left-side { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
         .drag-handle { color: var(--text-muted); font-size: 1.25rem; cursor: grab; padding-right: 4px; user-select: none; }
         .toggle-container span.module-label-text { font-size: 0.9rem; color: var(--text); font-weight: 500; }
         
-        .control-group { display: flex; align-items: center; gap: 12px; }
+        .control-group { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
         .val-indicator { font-family: var(--mono); font-size: 0.8rem; color: var(--accent); width: 44px; text-align: right; }
 
         .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
@@ -328,6 +335,26 @@
         .apply-ai-btn { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); padding: 10px 20px; border-radius: 100px; font-size: 0.75rem; font-weight: 700; cursor: not-allowed; transition: 0.3s; }
         .apply-ai-btn.ready { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #030408; border: none; cursor: pointer; box-shadow: 0 4px 16px var(--accent-glow); }
 
+        .ai-rec-grid { display: flex; flex-direction: column; gap: 10px; max-height: 320px; overflow-y: auto; padding-right: 4px; }
+        .ai-rec-grid::-webkit-scrollbar { width: 4px; }
+        .ai-rec-grid::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 4px; }
+        .ai-rec-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px 14px;
+            cursor: pointer;
+            transition: 0.25s;
+        }
+        .ai-rec-card:hover { border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); }
+        .ai-rec-card.active { border-color: var(--accent); background: rgba(0, 240, 255, 0.06); box-shadow: 0 0 0 1px rgba(0,240,255,0.15); }
+        .ai-rec-card.pending { opacity: 0.55; cursor: default; }
+        .ai-rec-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+        .ai-rec-card-name { font-size: 0.78rem; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+        .sr-badge { font-family: var(--mono); font-size: 0.62rem; color: var(--accent); background: rgba(0,240,255,0.08); padding: 2px 8px; border-radius: 100px; flex-shrink: 0; }
+        .ai-rec-params { font-size: 0.72rem; line-height: 1.65; color: var(--text-muted); font-family: var(--mono); }
+        .sr-info-line { font-size: 0.72rem; color: var(--text-muted); font-family: var(--mono); margin-top: 8px; }
+
         .batch-container { margin-top: 40px; }
         .batch-list { display: flex; flex-direction: column; gap: 8px; list-style: none; padding: 0; }
         .batch-item { 
@@ -381,8 +408,45 @@
         .warning-bg .warn-tag { opacity: 0.8; transform: scale(1); background: var(--warning); }
         .danger-bg .warn-tag { opacity: 1; transform: scale(1); background: var(--danger); box-shadow: 0 0 10px rgba(239,68,68,0.4); }
 
-        .download-btn { display: block; text-align: center; padding: 20px; background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: var(--radius-sm); color: var(--accent); text-decoration: none; font-weight: 700; font-size: 1rem; transition: 0.3s; }
-        .download-btn:hover { background: rgba(0, 240, 255, 0.2); transform: translateY(-2px); border-color: var(--accent); }
+        .download-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .download-btn {
+            display: block;
+            width: 100%;
+            text-align: center;
+            padding: 20px;
+            background: rgba(0, 240, 255, 0.1);
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            border-radius: var(--radius-sm);
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 1rem;
+            transition: 0.3s;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .download-btn:hover {
+            background: rgba(0, 240, 255, 0.2);
+            transform: translateY(-2px);
+            border-color: var(--accent);
+            box-shadow: 0 8px 24px rgba(0, 240, 255, 0.15);
+        }
+        .download-btn.zip-download-btn {
+            background: rgba(129, 140, 248, 0.1);
+            border: 1px solid rgba(129, 140, 248, 0.3);
+            color: var(--accent2);
+        }
+        .download-btn.zip-download-btn:hover {
+            background: rgba(129, 140, 248, 0.22);
+            transform: translateY(-2px);
+            border-color: var(--accent2);
+            box-shadow: 0 8px 24px rgba(139, 92, 246, 0.25);
+        }
 
         .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 1000; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(8px); }
         .modal-content { background: var(--surface); border-radius: var(--radius); padding: 32px; width: 100%; max-width: 440px; border: 1px solid var(--border); box-shadow: 0 32px 64px rgba(0,0,0,0.6); }
@@ -393,6 +457,164 @@
         .loader { width: 40px; height: 40px; border: 3px solid rgba(0, 240, 255, 0.1); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; display: block; margin: 0 auto; }
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .export-options-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+
+        /* ── 모바일 / 좁은 화면 (안드로이드·iPhone 세로) ── */
+        @media (max-width: 600px) {
+            body {
+                padding: 16px 12px calc(40px + env(safe-area-inset-bottom, 0px));
+                padding-left: max(12px, env(safe-area-inset-left, 0px));
+                padding-right: max(12px, env(safe-area-inset-right, 0px));
+            }
+
+            .header-flex { margin-bottom: 28px; gap: 10px; }
+            h1.title { font-size: 2rem; line-height: 1.15; }
+
+            .main-card {
+                padding: 18px 14px;
+                border-radius: 20px;
+            }
+
+            .upload-area { padding: 36px 14px; }
+            #file-name-display { font-size: 1rem; word-break: break-all; }
+
+            .preview-rack { padding: 14px; margin: 16px 0; }
+            .preview-header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+            }
+            .preview-btn { width: 100%; text-align: center; padding: 12px 16px; }
+
+            .preset-row { margin-bottom: 18px; }
+            #quality-preset { width: 100%; }
+
+            .export-options-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .export-options-row label { width: 100%; }
+            #export-sample-rate,
+            #export-bit-depth,
+            #export-tp-ceiling {
+                width: 100% !important;
+                min-width: 0 !important;
+                flex: none !important;
+            }
+
+            .options-grid { gap: 8px; }
+
+            /* DSP: 라벨 / 컨트롤 2줄 — 슬라이더 밀림 해소 */
+            .toggle-container {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 12px;
+                padding: 12px 14px;
+            }
+            .toggle-left-side { width: 100%; }
+            .drag-handle { display: none; }
+            .toggle-container span.module-label-text {
+                font-size: 0.82rem;
+                line-height: 1.35;
+            }
+            .warn-tag { margin-left: 4px; }
+
+            .control-group {
+                width: 100%;
+                flex-shrink: 1;
+                justify-content: flex-end;
+                gap: 10px;
+            }
+            input[type="range"] {
+                flex: 1 1 auto;
+                width: auto;
+                min-width: 0;
+                max-width: none;
+                height: 8px;
+                touch-action: none;
+            }
+            input[type="range"]::-webkit-slider-thumb {
+                width: 26px;
+                height: 26px;
+            }
+            input[type="range"]::-moz-range-thumb {
+                width: 26px;
+                height: 26px;
+            }
+            .val-indicator {
+                width: 42px;
+                font-size: 0.75rem;
+            }
+
+            .result-area { margin-top: 32px; }
+            .visualization-container { padding: 14px; }
+
+            .master-controls {
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 14px 10px;
+                margin: 28px 0;
+            }
+            .master-play-btn { width: 56px; height: 56px; font-size: 1.35rem; }
+            .ab-toggle-btn { padding: 6px 12px; }
+            .mode-label { font-size: 0.68rem; }
+            .toggle-switch { margin: 0 10px; }
+
+            #ai-report-area { padding: 16px !important; }
+
+            .metrics-grid {
+                grid-template-columns: 1fr !important;
+                gap: 8px !important;
+            }
+            .metrics-grid .metric-item {
+                border: none !important;
+                padding: 10px 0;
+                border-bottom: 1px solid var(--border) !important;
+            }
+            .metrics-grid .metric-item:last-child {
+                border-bottom: none !important;
+            }
+
+            #spec-bar-bass,
+            #spec-bar-mid,
+            #spec-bar-treble {
+                font-size: 0.55rem !important;
+                line-height: 11px !important;
+            }
+
+            .ai-rec-header {
+                flex-direction: column !important;
+                align-items: stretch !important;
+                gap: 10px !important;
+            }
+            .ai-rec-header > div {
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 8px !important;
+                width: 100%;
+            }
+            .apply-ai-btn {
+                width: 100%;
+                text-align: center;
+                padding: 12px 16px;
+            }
+
+            .batch-item { padding: 12px 14px; font-size: 0.8rem; }
+            .download-btn { padding: 16px; font-size: 0.9rem; }
+
+            .modal-content { padding: 22px 18px; }
+        }
+
+        @media (max-width: 380px) {
+            h1.title { font-size: 1.65rem; }
+            .toggle-container span.module-label-text { font-size: 0.78rem; }
+        }
     </style>
 </head>
 <body>
@@ -447,6 +669,44 @@
                     <option value="vinyl_digital">💿 LP / 카세트 디지털화</option>
                 </optgroup>
             </select>
+        </div>
+
+        <div class="preset-row" style="margin-top:12px;">
+            <label style="font-size:0.85rem;color:var(--text-muted);font-weight:700;">OFFLINE EXPORT <span class="offline-badge">배치 렌더 전용</span></label>
+            <div class="export-options-row">
+                <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--text-muted);cursor:pointer;">
+                    <input type="checkbox" id="opt-offline-upsample" checked style="accent-color:var(--accent);">
+                    고해상도 업샘플
+                </label>
+                <select id="export-sample-rate" style="flex:1;min-width:140px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:10px 14px;color:white;font-family:var(--font);font-size:0.85rem;">
+                    <option value="native">원본 SR 유지 (업샘플 없음)</option>
+                    <option value="48000">48 kHz</option>
+                    <option value="96000" selected>96 kHz</option>
+                    <option value="192000">192 kHz</option>
+                </select>
+                <select id="export-bit-depth" style="min-width:110px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:10px 14px;color:white;font-family:var(--font);font-size:0.85rem;">
+                    <option value="24" selected>24-bit PCM</option>
+                    <option value="16">16-bit PCM</option>
+                </select>
+            </div>
+            <div class="export-options-row" style="margin-top:8px;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--text-muted);cursor:pointer;">
+                    <input type="checkbox" id="opt-sox-resample" checked style="accent-color:var(--accent2);">
+                    SoX 리샘플 (WASM)
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--text-muted);cursor:pointer;">
+                    <input type="checkbox" id="opt-true-peak" checked style="accent-color:var(--accent2);">
+                    True Peak 리미터
+                </label>
+                <select id="export-tp-ceiling" style="min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:8px 12px;color:white;font-size:0.8rem;">
+                    <option value="-1.0" selected>−1.0 dBTP</option>
+                    <option value="-1.5">−1.5 dBTP</option>
+                    <option value="-2.0">−2.0 dBTP</option>
+                </select>
+            </div>
+            <p style="font-size:0.7rem;color:var(--text-muted);line-height:1.5;margin-top:4px;">
+                배치/ZIP 전용: SoX <code style="font-size:0.65rem;">rate</code> 업샘플 → 4× 오버샘플 True Peak( ITU 권장 방식 근사 ) → 소프트클립. Float32 유지 후 24/16-bit PCM 보내기.
+            </p>
         </div>
 
         <!-- DSP 팩터 체인 -->
@@ -581,6 +841,8 @@
                     <div id="metric-phase" style="font-family:var(--mono); color:#fff; font-weight:700;">0.99</div>
                 </div>
             </div>
+            <div id="sr-display" class="sr-info-line">Sample rate: —</div>
+            <div id="tp-display" class="sr-info-line" style="margin-top:4px;">True peak: —</div>
             
             <div id="ai-recommendation-box" class="ai-rec-box" style="margin-top:16px;">
                 <div class="ai-rec-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
@@ -627,8 +889,10 @@
             <ul class="batch-list" id="batch-list"></ul>
         </div>
 
-        <a href="#" id="download-link" class="download-btn">📥 DOWNLOAD CURRENT MASTER</a>
-        <button type="button" id="zip-download-btn" class="download-btn" style="width:100%; background:rgba(129,140,248,0.1); border: 1px solid rgba(129,140,248,0.3); color:var(--accent2); display:none; margin-top:12px; font-weight:700;">📦 EXPORT ALL AS ZIP ARCHIVE</button>
+        <div class="download-actions">
+            <a href="#" id="download-link" class="download-btn">📥 DOWNLOAD CURRENT MASTER</a>
+            <button type="button" id="zip-download-btn" class="download-btn zip-download-btn" style="display:none;">📦 EXPORT ALL AS ZIP ARCHIVE</button>
+        </div>
     </div>
 </div>
 
@@ -715,6 +979,7 @@ let currentRecJSON = null;
 // MULTI FILE AI RECOMMENDATION STATE
 // ─────────────────────────────────────────────
 const aiRecommendationMap = new Map();
+const aiAdviceMap = new Map();
 const fileParameterMap = new Map();
 let currentSelectedFileId = null;
 
@@ -753,6 +1018,8 @@ const domEl = {
 
     aiFeedback: document.getElementById('ai-feedback-text'),
     aiRecList:  document.getElementById('ai-rec-list'),
+    srDisplay:  document.getElementById('sr-display'),
+    tpDisplay:  document.getElementById('tp-display'),
     zipBtn:     document.getElementById('zip-download-btn'),
     batchList:  document.getElementById('batch-list'),
     previewRack:document.getElementById('preview-rack'),
@@ -769,8 +1036,51 @@ function revokeResultURLs(r) {
     try {
         if (!r) return;
         if (r.url) { try { URL.revokeObjectURL(r.url); } catch (e) { console.warn('revoke url failed', e); } }
+        if (r.exportUrl) { try { URL.revokeObjectURL(r.exportUrl); } catch (e) { console.warn('revoke exportUrl failed', e); } }
         if (r.orig) { try { URL.revokeObjectURL(r.orig); } catch (e) { console.warn('revoke orig failed', e); } }
     } catch (e) { console.warn('revokeResultURLs error', e); }
+}
+
+/** A/B 청취용 — DSP 결과 SR · 16-bit (브라우저 <audio> 호환) */
+function createPlaybackUrlFromBuffer(audioBuffer) {
+    return URL.createObjectURL(bufferToWave(audioBuffer, audioBuffer.length));
+}
+
+function createExportDownloadUrl(exportBlob) {
+    return URL.createObjectURL(exportBlob);
+}
+
+/** A/B: 두 트랙 동시 재생 + mute/volume 으로만 전환 (싱크 유지) */
+function applyAbPlaybackState(isRestored) {
+    domEl.oP.muted = isRestored;
+    domEl.rP.muted = !isRestored;
+    if (domEl.oP.muted) domEl.oP.volume = 0;
+    else domEl.oP.volume = 1;
+    if (domEl.rP.muted) domEl.rP.volume = 0;
+    else domEl.rP.volume = 1;
+}
+
+async function playAudioElement(el) {
+    try {
+        await el.play();
+    } catch (err) {
+        await new Promise((resolve, reject) => {
+            const onReady = () => { el.removeEventListener('canplay', onReady); el.removeEventListener('error', onErr); resolve(); };
+            const onErr = () => { el.removeEventListener('canplay', onReady); el.removeEventListener('error', onErr); reject(err); };
+            el.addEventListener('canplay', onReady, { once: true });
+            el.addEventListener('error', onErr, { once: true });
+            el.load();
+        });
+        await el.play();
+    }
+}
+
+async function syncAndPlayAbPair() {
+    const isR = document.getElementById('ab-toggle-btn').classList.contains('restored');
+    applyAbPlaybackState(isR);
+
+    domEl.rP.currentTime = domEl.oP.currentTime;
+    await Promise.all([playAudioElement(domEl.oP), playAudioElement(domEl.rP)]);
 }
 
 // 실시간 프리뷰 루프 정지 및 오디오 컨텍스트 닫기 (메모리 가비지 컬렉션 강화)
@@ -841,6 +1151,12 @@ async function clearAllResults() {
         if (preBatchSection) preBatchSection.style.display = 'none';
         const preBatchList = document.getElementById('pre-batch-list');
         if (preBatchList) preBatchList.innerHTML = '';
+        aiRecommendationMap.clear();
+        aiAdviceMap.clear();
+        currentSelectedFileId = null;
+        if (domEl.aiRecList) domEl.aiRecList.textContent = '처리 완료 후 파라미터 추천이 시작됩니다.';
+        if (domEl.srDisplay) domEl.srDisplay.textContent = 'Sample rate: —';
+        if (domEl.tpDisplay) domEl.tpDisplay.textContent = 'True peak: —';
     } catch (e) { /* ignore */ }
 }
 
@@ -1107,6 +1423,568 @@ function makeAnalogSoulCurve(gain) {
 function createOfflineContext(channels, length, sampleRate) {
     const Cls = window.OfflineAudioContext || window.webkitOfflineAudioContext;
     return new Cls(channels, length, sampleRate);
+}
+
+// ─────────────────────────────────────────────
+// SAMPLE RATE: detect, decode, resample (upsample)
+// ─────────────────────────────────────────────
+const MPEG_SAMPLE_RATES = [
+    [44100, 48000, 32000],
+    [22050, 24000, 16000],
+    [11025, 12000, 8000]
+];
+
+function clampSampleRate(sr) {
+    return Math.min(384000, Math.max(8000, Math.round(sr)));
+}
+
+function readWavSampleRate(arrayBuffer) {
+    if (arrayBuffer.byteLength < 44) return null;
+    const view = new DataView(arrayBuffer);
+    const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+    if (riff !== 'RIFF') return null;
+    const wave = String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11));
+    if (wave !== 'WAVE') return null;
+    let offset = 12;
+    while (offset + 8 <= view.byteLength) {
+        const id = String.fromCharCode(
+            view.getUint8(offset), view.getUint8(offset + 1),
+            view.getUint8(offset + 2), view.getUint8(offset + 3)
+        );
+        const size = view.getUint32(offset + 4, true);
+        if (id === 'fmt ' && offset + 16 <= view.byteLength) {
+            return view.getUint32(offset + 12, true);
+        }
+        offset += 8 + size + (size % 2);
+    }
+    return null;
+}
+
+function readMp3SampleRate(arrayBuffer) {
+    const bytes = new Uint8Array(arrayBuffer);
+    const limit = Math.min(bytes.length - 4, 256 * 1024);
+    for (let i = 0; i < limit; i++) {
+        if (bytes[i] !== 0xff || (bytes[i + 1] & 0xe0) !== 0xe0) continue;
+        const version = (bytes[i + 1] >> 3) & 0x03;
+        const layer = (bytes[i + 1] >> 1) & 0x03;
+        if (layer === 0) continue;
+        const srIndex = (bytes[i + 2] >> 2) & 0x03;
+        if (srIndex === 3) continue;
+        let tableIdx = 1;
+        if (version === 3) tableIdx = 0;
+        else if (version === 2) tableIdx = 1;
+        else if (version === 0) tableIdx = 2;
+        else continue;
+        return MPEG_SAMPLE_RATES[tableIdx][srIndex];
+    }
+    return null;
+}
+
+function parseNativeSampleRate(arrayBuffer, fileName) {
+    const ext = (fileName || '').split('.').pop().toLowerCase();
+    if (ext === 'wav' || ext === 'wave') return readWavSampleRate(arrayBuffer);
+    if (ext === 'mp3' || ext === 'mpeg') return readMp3SampleRate(arrayBuffer);
+    return readWavSampleRate(arrayBuffer) || readMp3SampleRate(arrayBuffer);
+}
+
+async function getDecodeContext(targetSampleRate) {
+    const Cls = window.AudioContext || window.webkitAudioContext;
+    if (!targetSampleRate) {
+        if (!aCtx || aCtx.state === 'closed') aCtx = new Cls();
+        return aCtx;
+    }
+    const clamped = clampSampleRate(targetSampleRate);
+    if (aCtx && aCtx.state !== 'closed' && aCtx.sampleRate === clamped) return aCtx;
+    if (aCtx && aCtx.state !== 'closed') {
+        try { await aCtx.close(); } catch (e) { console.warn('aCtx close', e); }
+    }
+    try {
+        aCtx = new Cls({ sampleRate: clamped });
+    } catch (e) {
+        console.warn('AudioContext sampleRate fallback', e);
+        aCtx = new Cls();
+    }
+    return aCtx;
+}
+
+/** OfflineAudioContext 기반 리샘플 (브라우저 내장 Sinc 계열 — 오프라인 전용) */
+async function resampleBuffer(buffer, targetSampleRate) {
+    if (!buffer || Math.abs(buffer.sampleRate - targetSampleRate) < 1) return buffer;
+    const length = Math.max(1, Math.ceil(buffer.duration * targetSampleRate));
+    const offline = createOfflineContext(buffer.numberOfChannels, length, targetSampleRate);
+    const source = offline.createBufferSource();
+    source.buffer = buffer;
+    source.connect(offline.destination);
+    source.start(0);
+    return await offline.startRendering();
+}
+
+function cloneAudioBuffer(buffer) {
+    const nb = createOfflineContext(buffer.numberOfChannels, buffer.length, buffer.sampleRate)
+        .createBuffer(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+        nb.getChannelData(c).set(buffer.getChannelData(c));
+    }
+    return nb;
+}
+
+/** 인터샘플 피크 여유 — 업샘플 직전 −3dBFS 헤드룸 */
+function applyHeadroomToBuffer(buffer, headroomDb = -3) {
+    const gain = Math.pow(10, headroomDb / 20);
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+        const d = buffer.getChannelData(c);
+        for (let i = 0; i < d.length; i++) d[i] *= gain;
+    }
+    return buffer;
+}
+
+/** 오프라인 렌더 최종 안전망 — tanh 소프트 클리퍼 + 실링 */
+function applySoftClipperToBuffer(buffer, threshold = 0.85, ceiling = 0.988) {
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+        const data = buffer.getChannelData(c);
+        for (let i = 0; i < data.length; i++) {
+            let s = data[i];
+            if (Math.abs(s) > threshold) {
+                s = Math.sign(s) * (threshold + (1.0 - threshold) *
+                    Math.tanh((Math.abs(s) - threshold) / (1.0 - threshold)));
+            }
+            if (Math.abs(s) > ceiling) s = Math.sign(s) * ceiling;
+            data[i] = s;
+        }
+    }
+    return buffer;
+}
+
+function canUseOfflineSampleRate(sampleRate) {
+    try {
+        createOfflineContext(1, 1, clampSampleRate(sampleRate));
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+const SOX_CDN_BASE = 'https://cdn.jsdelivr.net/gh/rameshvarun/sox-emscripten@v0.1.0/build/';
+const TRUE_PEAK_OVERSAMPLE = 4;
+const TRUE_PEAK_MAX_PASSES = 5;
+
+// ─────────────────────────────────────────────
+// SoX WASM (오프라인 리샘플)
+// ─────────────────────────────────────────────
+function isSoxAvailable() {
+    return typeof SOXModule === 'function';
+}
+
+function waitForSox(maxMs = 20000) {
+    if (isSoxAvailable()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        const t0 = Date.now();
+        const tick = () => {
+            if (isSoxAvailable()) return resolve();
+            if (Date.now() - t0 > maxMs) {
+                return reject(new Error('SoX WASM 로드 시간 초과 (네트워크/CDN 확인)'));
+            }
+            setTimeout(tick, 80);
+        };
+        tick();
+    });
+}
+
+function runSoxCli(args, inputFiles) {
+    return new Promise((resolve, reject) => {
+        if (!isSoxAvailable()) {
+            reject(new Error('SoX WASM not loaded'));
+            return;
+        }
+        const mod = {
+            arguments: args,
+            locateFile: (path) => (path.endsWith('.wasm') ? SOX_CDN_BASE + 'sox.wasm' : path),
+            preRun: [() => {
+                Object.entries(inputFiles).forEach(([name, data]) => {
+                    mod.FS.writeFile(name, data);
+                });
+            }],
+            postRun: [() => resolve(mod)],
+            onAbort: (reason) => reject(new Error('SoX abort: ' + reason))
+        };
+        SOXModule(mod).catch(reject);
+    });
+}
+
+async function bufferToWavArrayBuffer(audioBuffer) {
+    const blob = bufferToWave(audioBuffer, audioBuffer.length);
+    return await blob.arrayBuffer();
+}
+
+async function decodeWavArrayBuffer(arrayBuffer) {
+    const ctx = await getDecodeContext(null);
+    return await ctx.decodeAudioData(arrayBuffer.slice(0));
+}
+
+async function resampleBufferWithSox(buffer, targetSampleRate) {
+    if (!buffer || Math.abs(buffer.sampleRate - targetSampleRate) < 1) return buffer;
+
+    const inName = 'nova_in.wav';
+    const outName = 'nova_out.wav';
+    const wavIn = new Uint8Array(await bufferToWavArrayBuffer(buffer));
+
+    const mod = await runSoxCli(
+        [inName, outName, 'rate', String(Math.round(targetSampleRate))],
+        { [inName]: wavIn }
+    );
+
+    let outBytes;
+    try {
+        outBytes = mod.FS.readFile(outName);
+    } finally {
+        try { mod.FS.unlink(inName); } catch (e) { /* ignore */ }
+        try { mod.FS.unlink(outName); } catch (e) { /* ignore */ }
+    }
+
+    const wavAb = outBytes instanceof ArrayBuffer
+        ? outBytes
+        : outBytes.buffer.slice(outBytes.byteOffset, outBytes.byteOffset + outBytes.byteLength);
+    const decoded = await decodeWavArrayBuffer(wavAb);
+    if (Math.abs(decoded.sampleRate - targetSampleRate) > 2) {
+        console.warn('[SoX] SR mismatch, browser 보정:', decoded.sampleRate, '→', targetSampleRate);
+        return await resampleBuffer(decoded, targetSampleRate);
+    }
+    return decoded;
+}
+
+async function resampleForExport(buffer, targetSampleRate) {
+    const wantSox = document.getElementById('opt-sox-resample')?.checked !== false;
+    if (wantSox) {
+        try {
+            await waitForSox();
+            domEl.statusText && (domEl.statusText.textContent = `SoX 리샘플 → ${targetSampleRate} Hz`);
+            const out = await resampleBufferWithSox(buffer, targetSampleRate);
+            return { buffer: out, engine: 'sox' };
+        } catch (err) {
+            console.warn('[SoX] 실패, OfflineAudioContext 폴백:', err);
+        }
+    }
+    const out = await resampleBuffer(buffer, targetSampleRate);
+    return { buffer: out, engine: 'browser' };
+}
+
+// ─────────────────────────────────────────────
+// True Peak (4× 오버샘플 피크 측정 + 리미팅)
+// ─────────────────────────────────────────────
+async function measureTruePeak(buffer) {
+    const osRate = buffer.sampleRate * TRUE_PEAK_OVERSAMPLE;
+    const oversampled = await resampleBuffer(buffer, osRate);
+    let peak = 0;
+    for (let c = 0; c < oversampled.numberOfChannels; c++) {
+        const d = oversampled.getChannelData(c);
+        for (let i = 0; i < d.length; i++) {
+            const a = Math.abs(d[i]);
+            if (a > peak) peak = a;
+        }
+    }
+    const peakDb = 20 * Math.log10(peak + 1e-12);
+    return { peak, peakDb, oversampleFactor: TRUE_PEAK_OVERSAMPLE };
+}
+
+function getTruePeakCeilingDb() {
+    const v = parseFloat(document.getElementById('export-tp-ceiling')?.value || '-1');
+    return Number.isFinite(v) ? v : -1.0;
+}
+
+async function applyTruePeakLimiter(buffer, ceilingDb) {
+    const enabled = document.getElementById('opt-true-peak')?.checked !== false;
+    if (!enabled) {
+        const { peakDb } = await measureTruePeak(buffer);
+        return { buffer, limited: false, truePeakDb: peakDb, ceilingDb: null, gain: 1 };
+    }
+
+    const ceiling = Math.pow(10, ceilingDb / 20);
+    let totalGain = 1;
+
+    for (let pass = 0; pass < TRUE_PEAK_MAX_PASSES; pass++) {
+        const { peak } = await measureTruePeak(buffer);
+        if (peak <= ceiling) break;
+        const g = ceiling / peak;
+        totalGain *= g;
+        for (let c = 0; c < buffer.numberOfChannels; c++) {
+            const d = buffer.getChannelData(c);
+            for (let i = 0; i < d.length; i++) d[i] *= g;
+        }
+    }
+
+    const { peakDb: finalTpDb } = await measureTruePeak(buffer);
+    const softThresh = Math.min(0.92, ceiling * 0.98);
+    applySoftClipperToBuffer(buffer, softThresh, ceiling);
+
+    return {
+        buffer,
+        limited: true,
+        truePeakDb: finalTpDb,
+        ceilingDb,
+        gain: totalGain
+    };
+}
+
+function updateTruePeakDisplay(r) {
+    if (!domEl.tpDisplay) return;
+    if (!r || r.truePeakDb == null || !Number.isFinite(r.truePeakDb)) {
+        domEl.tpDisplay.textContent = 'True peak: —';
+        return;
+    }
+    let text = `True peak: ${r.truePeakDb.toFixed(2)} dBTP`;
+    if (r.tpCeilingDb != null) text += ` (한도 ${r.tpCeilingDb} dBTP)`;
+    if (r.tpLimited) text += ' · 리미터 적용';
+    if (r.resampleEngine) text += ` · ${r.resampleEngine}`;
+    domEl.tpDisplay.textContent = text;
+}
+
+function resolveExportSampleRate(sourceRate) {
+    const enabled = document.getElementById('opt-offline-upsample')?.checked !== false;
+    if (!enabled) return null;
+
+    const mode = document.getElementById('export-sample-rate')?.value || 'native';
+    if (mode === 'native') return null;
+
+    let target = parseInt(mode, 10);
+    if (!Number.isFinite(target) || target <= sourceRate) return null;
+
+    const fallbacks = [target, 192000, 96000, 48000]
+        .filter((sr, i, arr) => arr.indexOf(sr) === i)
+        .filter(sr => sr > sourceRate)
+        .sort((a, b) => b - a);
+
+    for (const sr of fallbacks) {
+        const clamped = clampSampleRate(sr);
+        if (clamped <= sourceRate) continue;
+        if (canUseOfflineSampleRate(clamped)) return clamped;
+    }
+    return null;
+}
+
+/**
+ * 오프라인 배치 export 파이프라인
+ * DSP 마스터 → (선택) −3dB 헤드룸 → SoX/브라우저 업샘플 → True Peak 리미터 → applySafety
+ */
+async function offlineExportPipeline(masterBuffer, nativeSampleRate) {
+    const sourceRate = masterBuffer.sampleRate;
+    const targetSr = resolveExportSampleRate(nativeSampleRate || sourceRate);
+    let work = cloneAudioBuffer(masterBuffer);
+    let resampleEngine = 'none';
+    let upsampled = false;
+    let warning = null;
+
+    if (targetSr) {
+        domEl.statusText && (domEl.statusText.textContent = `업샘플: ${sourceRate} → ${targetSr} Hz`);
+        applyHeadroomToBuffer(work, -3);
+        try {
+            const { buffer, engine } = await resampleForExport(work, targetSr);
+            work = buffer;
+            resampleEngine = engine;
+            upsampled = true;
+        } catch (err) {
+            console.warn('업샘플 실패:', err);
+            warning = err.message;
+            work = cloneAudioBuffer(masterBuffer);
+            upsampled = false;
+        }
+    }
+
+    const ceilingDb = getTruePeakCeilingDb();
+    domEl.statusText && (domEl.statusText.textContent = 'True Peak 분석/리미팅…');
+    const tp = await applyTruePeakLimiter(work, ceilingDb);
+    work = tp.buffer;
+
+    applySafety(work);
+
+    console.log('[Export]', {
+        sr: `${sourceRate} → ${work.sampleRate}`,
+        engine: resampleEngine,
+        truePeakDb: tp.truePeakDb,
+        ceilingDb: tp.ceilingDb
+    });
+
+    return {
+        buffer: work,
+        exportSampleRate: work.sampleRate,
+        upsampled,
+        warning,
+        resampleEngine,
+        truePeakDb: tp.truePeakDb,
+        tpCeilingDb: tp.ceilingDb,
+        tpLimited: tp.limited,
+        headroomDb: upsampled ? -3 : null
+    };
+}
+
+async function encodeMasterToExportBlob(masterBuffer, nativeSampleRate) {
+    const pipeline = await offlineExportPipeline(masterBuffer, nativeSampleRate);
+    const exportBuf = pipeline.buffer;
+
+    const bitDepth = document.getElementById('export-bit-depth')?.value || '24';
+    const blob = bitDepth === '16'
+        ? bufferToWave(exportBuf, exportBuf.length)
+        : bufferToWave24(exportBuf, exportBuf.length);
+
+    return {
+        blob,
+        exportBuf,
+        exportSampleRate: pipeline.exportSampleRate,
+        upsampled: pipeline.upsampled,
+        warning: pipeline.warning,
+        resampleEngine: pipeline.resampleEngine,
+        truePeakDb: pipeline.truePeakDb,
+        tpCeilingDb: pipeline.tpCeilingDb,
+        tpLimited: pipeline.tpLimited
+    };
+}
+
+async function decodeAudioFile(file, useMainContext = true) {
+    const arrayBuf = await file.arrayBuffer();
+    const copy = arrayBuf.slice(0);
+    const nativeSr = parseNativeSampleRate(copy, file.name);
+    let ctx;
+    let audioBuf;
+
+    if (useMainContext) {
+        ctx = await getDecodeContext(nativeSr || null);
+        audioBuf = await ctx.decodeAudioData(copy);
+    } else {
+        try {
+            ctx = nativeSr
+                ? new (window.AudioContext || window.webkitAudioContext)({ sampleRate: clampSampleRate(nativeSr) })
+                : new (window.AudioContext || window.webkitAudioContext)();
+        } catch (e) {
+            ctx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        audioBuf = await ctx.decodeAudioData(copy);
+    }
+
+    const decodedSr = audioBuf.sampleRate;
+    const targetSr = nativeSr || decodedSr;
+
+    if (nativeSr && Math.abs(decodedSr - nativeSr) > 1) {
+        console.log(`[SR] ${file.name}: ${decodedSr} Hz → ${nativeSr} Hz (리샘플 복원)`);
+        audioBuf = await resampleBuffer(audioBuf, nativeSr);
+    }
+
+    if (!useMainContext && ctx && ctx.state !== 'closed') {
+        try { await ctx.close(); } catch (e) { /* ignore */ }
+    }
+
+    return {
+        audioBuf,
+        nativeSr: targetSr,
+        decodedSr: audioBuf.sampleRate,
+        resampled: !!(nativeSr && Math.abs(decodedSr - nativeSr) > 1)
+    };
+}
+
+function updateSampleRateDisplay(r) {
+    if (!domEl.srDisplay || !r) return;
+    const native = r.nativeSampleRate || r.origBuffer?.sampleRate;
+    const proc = r.buffer?.sampleRate;
+    let text = native ? `Sample rate: ${Math.round(native)} Hz (원본)` : 'Sample rate: —';
+    if (proc && native && Math.abs(proc - native) > 1) {
+        text += ` → 출력 ${Math.round(proc)} Hz`;
+    } else if (proc && !native) {
+        text = `Sample rate: ${Math.round(proc)} Hz`;
+    }
+    if (r.resampled) text += ' · SR 복원 적용됨';
+    if (r.upsampled && r.exportSampleRate) {
+        text += ` · 보내기 ${Math.round(r.exportSampleRate)} Hz`;
+    }
+    if (r.resampleEngine && r.resampleEngine !== 'none') {
+        text += ` (${r.resampleEngine})`;
+    }
+    domEl.srDisplay.textContent = text;
+}
+
+function formatAiRecParams(rec) {
+    if (!rec) return '분석 대기 중…';
+    return `MB ${rec.multiband} · PB ${rec.punchy_bass} · SR ${rec.super_res} · BR ${rec.brilliance} · ST ${rec.stereo} · LM ${rec.limiter}`;
+}
+
+function updateAiFeedbackForSelection() {
+    if (!domEl.aiFeedback || !currentSelectedFileId) return;
+    const advice = aiAdviceMap.get(currentSelectedFileId);
+    if (advice) {
+        domEl.aiFeedback.textContent = advice;
+        domEl.aiFeedback.style.color = 'var(--text)';
+    }
+}
+
+function renderAllAiRecommendations(activeFileId) {
+    if (!domEl.aiRecList) return;
+    if (!resL.length || !lastF.length) {
+        domEl.aiRecList.textContent = '처리 완료 후 파라미터 추천이 시작됩니다.';
+        return;
+    }
+
+    const cards = resL.map((r, i) => {
+        const file = lastF[i];
+        if (!file) return '';
+        const fileId = makeFileId(file);
+        const rec = aiRecommendationMap.get(fileId);
+        const isActive = fileId === activeFileId;
+        const sr = r.nativeSampleRate || r.origBuffer?.sampleRate;
+        const srBadge = sr ? `${Math.round(sr)} Hz` : '—';
+        const pending = !rec;
+        return `<div class="ai-rec-card ${isActive ? 'active' : ''} ${pending ? 'pending' : ''}" data-ai-index="${i}" title="${file.name}">
+            <div class="ai-rec-card-head">
+                <span class="ai-rec-card-name">${i + 1}. ${file.name}</span>
+                <span class="sr-badge">${srBadge}</span>
+            </div>
+            <div class="ai-rec-params">${formatAiRecParams(rec)}</div>
+        </div>`;
+    }).join('');
+
+    domEl.aiRecList.innerHTML = `<div class="ai-rec-grid">${cards}</div>`;
+    domEl.aiRecList.querySelectorAll('.ai-rec-card:not(.pending)').forEach(card => {
+        card.addEventListener('click', () => {
+            const idx = Number(card.dataset.aiIndex);
+            if (!Number.isNaN(idx)) showResult(idx);
+        });
+    });
+}
+
+function computeResultMetrics(r) {
+    let freqRatios = { bass: 33, mid: 34, treble: 33 };
+    try {
+        freqRatios = analyzeFrequencyRatios(r.origBuffer);
+    } catch (e) {
+        console.error('주파수 분석 실패:', e);
+    }
+
+    const data = r.buffer.getChannelData(0);
+    let sum = 0, peak = 0;
+    for (let i = 0; i < data.length; i++) {
+        sum += data[i] * data[i];
+        const a = Math.abs(data[i]);
+        if (a > peak) peak = a;
+    }
+    const rms = Math.sqrt(sum / data.length);
+    let estimatedLUFS = -24;
+    try {
+        const filteredRms = rmsWithHighpass(r.buffer, 100);
+        estimatedLUFS = 20 * Math.log10(filteredRms + 1e-12);
+    } catch (e) {
+        estimatedLUFS = 20 * Math.log10(rms + 1e-12);
+    }
+
+    const crest = peak / (rms + 1e-12);
+    estimatedLUFS -= Math.min(6, (crest - 3) * 0.8);
+    estimatedLUFS = Number.isFinite(estimatedLUFS) ? Math.max(-60, Math.min(0, estimatedLUFS)) : -24;
+
+    let crestValue = 20 * Math.log10(crest);
+    crestValue = Number.isFinite(crestValue) ? Math.max(3, Math.min(24, crestValue)) : 12;
+
+    return {
+        lufs: estimatedLUFS.toFixed(1),
+        crest: crestValue.toFixed(1),
+        phase: r.buffer.numberOfChannels > 1 ? '0.98 / Stereo' : '1.0 / Mono',
+        freq: `Bass=${freqRatios.bass}%, Mid=${freqRatios.mid}%, Treble=${freqRatios.treble}%`,
+        freqRatios
+    };
 }
 
 // 오디오 리미팅 안전 마스터 가이드 수치 보정
@@ -1509,26 +2387,7 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
         
         let rend = await off.startRendering();
 
-        // [최종 안전장치] 렌더링 직후 정밀 tanh 소프트 클리퍼 및 하드 실링
-        for (let c = 0; c < rend.numberOfChannels; c++) {
-            const data = rend.getChannelData(c);
-            for (let i = 0; i < data.length; i++) {
-                let s = data[i];
-
-                // 1. tanh 소프트 클리핑 (0.85 임계값 부드러운 곡선 압축)
-                const thresh = 0.85;
-                if (Math.abs(s) > thresh) {
-                    s = Math.sign(s) * (thresh + (1.0 - thresh) * Math.tanh((Math.abs(s) - thresh) / (1.0 - thresh)));
-                }
-
-                // 2. 최종 마스터 실링 (0.988 초과 원천 방어)
-                if (Math.abs(s) > 0.988) {
-                    s = Math.sign(s) * 0.988;
-                }
-
-                data[i] = s;
-            }
-        }
+        applySoftClipperToBuffer(rend);
 
         // Peak Normalize
         {
@@ -1572,21 +2431,53 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
     }
 }
 
-// 15초 길이의 루프 재생 전용 서브 오디오 버퍼 생성 (브라우저 호환성 및 완벽한 루프 보장)
+function computePunchyBassGain(val, profile) {
+    const pb = profile.pb_gain > 0 ? profile.pb_gain : 0;
+    return Math.min((val + pb) * 12, 18);
+}
+
+function computeBrillianceGain(val, profile) {
+    const br = profile.br_gain > 0 ? profile.br_gain : 0;
+    return Math.min((val + br) * 15, 18);
+}
+
+// 프리뷰 버퍼는 반드시 AudioContext.sampleRate와 동일해야 재생이 깨지지 않음
 function createPreviewBuffer(ctx, originalBuffer) {
-    const sampleRate = originalBuffer.sampleRate;
+    const dstSr = ctx.sampleRate;
+    const srcSr = originalBuffer.sampleRate;
     const previewSeconds = 15;
-    const previewLength = Math.min(originalBuffer.length, sampleRate * previewSeconds);
+    const maxFrames = Math.min(
+        originalBuffer.length,
+        Math.floor(dstSr * previewSeconds)
+    );
     const previewBuffer = ctx.createBuffer(
         originalBuffer.numberOfChannels,
-        previewLength,
-        sampleRate
+        maxFrames,
+        dstSr
     );
-    
-    for (let channel = 0; channel < originalBuffer.numberOfChannels; channel++) {
-        const origData = originalBuffer.getChannelData(channel);
-        const prevData = previewBuffer.getChannelData(channel);
-        prevData.set(origData.subarray(0, previewLength));
+
+    if (Math.abs(srcSr - dstSr) < 1) {
+        for (let c = 0; c < originalBuffer.numberOfChannels; c++) {
+            previewBuffer.getChannelData(c).set(
+                originalBuffer.getChannelData(c).subarray(0, maxFrames)
+            );
+        }
+        return previewBuffer;
+    }
+
+    const srcFrames = Math.min(originalBuffer.length, Math.floor(srcSr * previewSeconds));
+    const ratio = srcSr / dstSr;
+    for (let c = 0; c < originalBuffer.numberOfChannels; c++) {
+        const src = originalBuffer.getChannelData(c);
+        const dst = previewBuffer.getChannelData(c);
+        for (let i = 0; i < maxFrames; i++) {
+            const pos = i * ratio;
+            const idx = Math.min(Math.floor(pos), srcFrames - 1);
+            const frac = pos - Math.floor(pos);
+            const s0 = src[idx] || 0;
+            const s1 = src[Math.min(idx + 1, srcFrames - 1)] || s0;
+            dst[i] = s0 + (s1 - s0) * frac;
+        }
     }
     return previewBuffer;
 }
@@ -1600,9 +2491,13 @@ async function startPreview() {
     // 기존 프리뷰 리소스 완전 클린업
     stopPreview();
     
-    // 오디오 컨텍스트 구동
     const Cls = window.AudioContext || window.webkitAudioContext;
-    previewState.ctx = new Cls();
+    const bufSr = previewState.buffer.sampleRate;
+    try {
+        previewState.ctx = new Cls({ sampleRate: bufSr });
+    } catch (e) {
+        previewState.ctx = new Cls();
+    }
     const ctx = previewState.ctx;
     
     // 브라우저의 Autoplay 보안 정책 대응 및 즉각 구동 보장
@@ -1614,10 +2509,9 @@ async function startPreview() {
     // loopEnd를 명시적으로 설정해 DSP 노드 레이턴시와 무관하게 정확히 15초 루프를 보장
     const source = ctx.createBufferSource();
     source.buffer = createPreviewBuffer(ctx, previewState.buffer);
-    const exactLoopSeconds = Math.min(15, source.buffer.duration);
     source.loop = true;
     source.loopStart = 0;
-    source.loopEnd = exactLoopSeconds;
+    source.loopEnd = Math.max(0.01, source.buffer.duration - 1 / ctx.sampleRate);
     previewState.source = source;
     previewState.activeNodes.source = source; // 가비지 컬렉션 방지 강한 참조
     
@@ -1716,7 +2610,11 @@ async function startPreview() {
     hC.release.value = profile.comp_release;
 
     const mbM = ctx.createGain();
-    mbM.gain.value = 0.7;
+    mbM.gain.value = 0.85;
+
+    lC.release.value = 0.20;
+    mC.release.value = 0.10;
+    hC.release.value = 0.05;
 
     activeGain.connect(lP[0]); lP[1].connect(lC); lC.connect(mbM);
     activeGain.connect(hP[0]); hP[1].connect(hC); hC.connect(mbM);
@@ -1729,11 +2627,9 @@ async function startPreview() {
     const pb = ctx.createBiquadFilter();
     pb.type = 'peaking';
     pb.frequency.value = 90;
-    
-    // [동적 연동 반영]
-    const currentPbGain = profile.pb_gain > 0 ? profile.pb_gain : 0;
-    pb.gain.value = (val + currentPbGain) * 12;
-    
+    const pbGain = computePunchyBassGain(val, profile);
+    pb.gain.value = pbGain;
+    pb.Q.value = 0.7 + (pbGain / 20);
     activeGain.connect(pb);
     pb.connect(moduleOutput);
     nodeRef = pb;
@@ -1750,11 +2646,7 @@ async function startPreview() {
     const br = ctx.createBiquadFilter();
     br.type = 'highshelf';
     br.frequency.value = 9500;
-    
-    // [동적 연동 반영] 고정 배수 분리 구조를 가산 방식으로 수정
-    const currentBrGain = profile.br_gain > 0 ? profile.br_gain : 0;
-    br.gain.value = (val + currentBrGain) * 15;
-    
+    br.gain.value = computeBrillianceGain(val, profile);
     activeGain.connect(br);
     br.connect(moduleOutput);
     nodeRef = br;
@@ -1813,7 +2705,7 @@ async function startPreview() {
         curve[i] = Math.tanh(x); 
     }
     previewWaveShaperNode.curve = curve;
-    previewWaveShaperNode.oversample = '4x'; // 앨리어싱 왜곡 방지를 위한 오버샘플링
+    previewWaveShaperNode.oversample = 'none';
 
     // 3. 가비지 컬렉션(메모리 해제) 방지를 위해 상태 객체에 강한 참조 저장
     previewState.activeNodes.waveShaper = previewWaveShaperNode;
@@ -1860,18 +2752,17 @@ function syncLiveParameter(id) {
             nodeObj.node.mC.threshold.setTargetAtTime(-18 - (val * 10), t, 0.005);
             nodeObj.node.hC.threshold.setTargetAtTime(-22 - (val * 10), t, 0.005);
             break;
-        case 'punchy_bass':
-            if (profile.pb_gain > 0) {
-                nodeObj.node.gain.setTargetAtTime(val * profile.pb_gain, t, 0.005);
-            }
+        case 'punchy_bass': {
+            const pbGain = computePunchyBassGain(val, profile);
+            nodeObj.node.gain.setTargetAtTime(pbGain, t, 0.005);
+            nodeObj.node.Q.setTargetAtTime(0.7 + (pbGain / 20), t, 0.005);
             break;
+        }
         case 'super_res':
             nodeObj.node.update(val);
             break;
         case 'brilliance':
-            if (profile.br_gain > 0) {
-                nodeObj.node.gain.setTargetAtTime(val * profile.br_gain * 0.55, t, 0.005);
-            }
+            nodeObj.node.gain.setTargetAtTime(computeBrillianceGain(val, profile), t, 0.005);
             break;
         case 'stereo':
             nodeObj.node.update(val);
@@ -1931,14 +2822,11 @@ async function decodeAllFilesForPreview(files) {
 
     for (let i = 0; i < files.length; i++) {
         try {
-            const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const arrBuf = await files[i].arrayBuffer();
-            const decoded = await tempCtx.decodeAudioData(arrBuf);
-            previewState.buffers.push(decoded);
-            tempCtx.close();
+            const { audioBuf } = await decodeAudioFile(files[i], false);
+            previewState.buffers.push(audioBuf);
         } catch (err) {
             console.error(`프리뷰 디코딩 오류 (${files[i].name}):`, err);
-            previewState.buffers.push(null); // 실패한 경우 null 유지
+            previewState.buffers.push(null);
         }
     }
 
@@ -2056,8 +2944,6 @@ document.getElementById('upload-form').addEventListener('submit', async e => {
         await clearAllResults();
         console.log('[SUBMIT] clearAllResults 완료');
 
-        if (!aCtx) aCtx = new (window.AudioContext || window.webkitAudioContext)();
-        console.log('[SUBMIT] aCtx 상태:', aCtx.state);
         resL = [];
 
         const chainModules = [...dspChain.querySelectorAll('.toggle-container')].map(el => el.dataset.module);
@@ -2065,35 +2951,45 @@ document.getElementById('upload-form').addEventListener('submit', async e => {
 
         for (let i = 0; i < lastF.length; i++) {
             domEl.statusText.textContent = `처리 중: ${i + 1} / ${lastF.length}`;
-            console.log(`[SUBMIT] 파일 ${i+1}/${lastF.length} 처리 시작:`, lastF[i].name);
-            const arrayBuf = await lastF[i].arrayBuffer();
-            console.log(`[SUBMIT] arrayBuffer 완료, aCtx 상태:`, aCtx.state);
-            const audioBuf = await aCtx.decodeAudioData(arrayBuf).catch(err => { throw new Error('디코딩 실패: ' + (err.message || err)); });
-            console.log(`[SUBMIT] decodeAudioData 완료`);
+            console.log(`[SUBMIT] 파일 ${i+1}/${lastF.length}:`, lastF[i].name);
+
+            const { audioBuf, nativeSr, decodedSr, resampled } = await decodeAudioFile(lastF[i], true)
+                .catch(err => { throw new Error('디코딩 실패: ' + (err.message || err)); });
+            console.log(`[SUBMIT] decode SR native=${nativeSr} decoded=${decodedSr}`);
 
             if (i === 0) previewState.buffer = audioBuf;
 
-            console.log(`[SUBMIT] runLegacyDSP 시작`);
             const restored = await runLegacyDSP(audioBuf, chainModules, presetName);
-            console.log(`[SUBMIT] runLegacyDSP 완료`);
-            const blob = bufferToWave(restored, restored.length);
-            const url = URL.createObjectURL(blob);
+            const exportMeta = await encodeMasterToExportBlob(restored, nativeSr);
+            const playbackUrl = createPlaybackUrlFromBuffer(restored);
+            const exportUrl = createExportDownloadUrl(exportMeta.blob);
             const origUrl = URL.createObjectURL(lastF[i]);
             resL.push({
                 name: lastF[i].name,
-                url,
-                blob,
+                url: playbackUrl,
+                exportUrl,
+                blob: exportMeta.blob,
                 orig: origUrl,
                 buffer: restored,
-                origBuffer: audioBuf // FFT 에너지 분석용 원본 버퍼
+                origBuffer: audioBuf,
+                nativeSampleRate: nativeSr,
+                decodedSampleRate: decodedSr,
+                resampled,
+                exportSampleRate: exportMeta.exportSampleRate,
+                upsampled: exportMeta.upsampled,
+                resampleEngine: exportMeta.resampleEngine,
+                truePeakDb: exportMeta.truePeakDb,
+                tpCeilingDb: exportMeta.tpCeilingDb,
+                tpLimited: exportMeta.tpLimited
             });
         }
 
         if (resL.length > 0) {
             renderBatchList();
             await showResult(0);
+            await runAiAnalysisForAllFiles();
             domEl.zipBtn.style.display = resL.length > 1 ? 'block' : 'none';
-            domEl.previewRack.classList.add('active'); // 프리뷰 랙 복원
+            domEl.previewRack.classList.add('active');
         }
     } catch (err) {
         alert('처리 중 오류: ' + (err.message || err));
@@ -2112,10 +3008,11 @@ function renderBatchList() {
     domEl.batchList.innerHTML = resL
         .map((r, i) => {
             const size = (r.blob.size / 1024 / 1024).toFixed(1) + 'MB';
+            const sr = r.nativeSampleRate ? `${Math.round(r.nativeSampleRate)}Hz · ` : '';
             return `
             <li class="batch-item ${i === 0 ? 'active' : ''}" data-index="${i}">
                 <span>${r.name}</span>
-                <span class="file-size">${size}</span>
+                <span class="file-size">${sr}${size}</span>
             </li>`;
         })
         .join('');
@@ -2183,10 +3080,11 @@ async function showResult(idx) {
 
         domEl.oP.src = r.orig;
         domEl.rP.src = r.url;
+        domEl.oP.load();
+        domEl.rP.load();
 
         const isRestored = document.getElementById('ab-toggle-btn').classList.contains('restored');
-        domEl.oP.muted = isRestored;
-        domEl.rP.muted = !isRestored;
+        applyAbPlaybackState(isRestored);
 
         const oLabel = document.getElementById('mode-original');
         const rLabel = document.getElementById('mode-restored');
@@ -2216,18 +3114,12 @@ async function showResult(idx) {
         wsO.on('interaction', () => { domEl.rP.currentTime = domEl.oP.currentTime; });
         wsR.on('interaction', () => { domEl.oP.currentTime = domEl.rP.currentTime; });
 
-        domEl.dl.href = r.url;
+        domEl.dl.href = r.exportUrl || r.url;
         domEl.dl.download = r.name.replace(/\.([^.]+)$/, '_Restored.wav');
 
-        // 오디오 주파수 분포 분석 (FFT 기반)
-        let freqRatios = { bass: 33, mid: 34, treble: 33 };
-        try {
-            freqRatios = analyzeFrequencyRatios(r.origBuffer);
-        } catch(e) {
-            console.error('주파수 분석 실패:', e);
-        }
+        const metrics = computeResultMetrics(r);
+        const freqRatios = metrics.freqRatios;
 
-        // 주파수 분포 바 UI 업데이트
         domEl.specBass.style.width = freqRatios.bass + '%';
         domEl.specBass.textContent = `Bass ${freqRatios.bass}%`;
         domEl.specMid.style.width = freqRatios.mid + '%';
@@ -2235,43 +3127,14 @@ async function showResult(idx) {
         domEl.specTreble.style.width = freqRatios.treble + '%';
         domEl.specTreble.textContent = `Treble ${freqRatios.treble}%`;
 
-        // 기존 기본 RMS 및 Peak Metrics 계산
-        const data = r.buffer.getChannelData(0);
-        let sum = 0, peak = 0;
-        for (let i = 0; i < data.length; i++) {
-            sum += data[i] * data[i];
-            const a = Math.abs(data[i]);
-            if (a > peak) peak = a;
-        }
-        const rms = Math.sqrt(sum / data.length);
-        let estimatedLUFS = -24;
-        try {
-            const filteredRms = rmsWithHighpass(r.buffer, 100);
-            estimatedLUFS = 20 * Math.log10(filteredRms + 1e-12);
-        } catch (e) {
-            estimatedLUFS = 20 * Math.log10(rms + 1e-12);
-        }
-
-        const crest = peak / (rms + 1e-12);
-        estimatedLUFS -= Math.min(6, (crest - 3) * 0.8);
-        estimatedLUFS = Number.isFinite(estimatedLUFS) ? Math.max(-60, Math.min(0, estimatedLUFS)) : -24;
-
-        let crestValue = 20 * Math.log10(crest);
-        crestValue = Number.isFinite(crestValue) ? Math.max(3, Math.min(24, crestValue)) : 12;
-
-        const metrics = {
-            lufs:  estimatedLUFS.toFixed(1),
-            crest: crestValue.toFixed(1),
-            phase: r.buffer.numberOfChannels > 1 ? '0.98 / Stereo' : '1.0 / Mono',
-            freq: `Bass=${freqRatios.bass}%, Mid=${freqRatios.mid}%, Treble=${freqRatios.treble}%`
-        };
-
         document.getElementById('metric-lufs').textContent  = metrics.lufs;
         document.getElementById('metric-crest').textContent = metrics.crest;
         document.getElementById('metric-phase').textContent = metrics.phase;
 
-        // AI 가이드 분석 데이터 전달
-        await getAI(metrics);
+        updateSampleRateDisplay(r);
+        updateTruePeakDisplay(r);
+        renderAllAiRecommendations(currentSelectedFileId);
+        updateAiFeedbackForSelection();
     });
 }
 
@@ -2293,25 +3156,72 @@ function clampDSP(name, value) {
     return Math.max(range[0], Math.min(range[1], Math.round(n)));
 }
 
-async function getAI(metrics) {
+async function runAiAnalysisForAllFiles() {
+    const key = (localStorage.getItem('groq_api_key') || '').trim();
+    if (!key || !key.startsWith('gsk_')) {
+        renderAllAiRecommendations(currentSelectedFileId);
+        if (domEl.aiFeedback) {
+            domEl.aiFeedback.textContent = 'Groq API 키가 설정되지 않아 AI 조언을 제공하지 않습니다. 우측 상단의 ⚙️ 버튼을 눌러 API 키를 설정해주세요.';
+        }
+        if (domEl.applyAiBtn) {
+            domEl.applyAiBtn.textContent = 'API 키 필요';
+            domEl.applyAiBtn.classList.remove('ready');
+        }
+        return;
+    }
+
+    if (domEl.aiRecList) {
+        domEl.aiRecList.innerHTML = '<div style="color:var(--text-muted);font-size:0.85rem;">모든 음원 AI 분석 중…</div>';
+    }
+
+    for (let i = 0; i < resL.length; i++) {
+        if (!lastF[i]) continue;
+        const fileId = makeFileId(lastF[i]);
+        domEl.statusText.textContent = `AI 분석: ${i + 1} / ${resL.length}`;
+        const metrics = computeResultMetrics(resL[i]);
+        await getAI(metrics, fileId, lastF[i].name, { skipFeedback: i > 0, batchMode: true });
+        if (i < resL.length - 1) await new Promise(r => setTimeout(r, 450));
+    }
+
+    domEl.statusText.textContent = 'NOVA ENGINE PROCESSING...';
+    renderAllAiRecommendations(currentSelectedFileId);
+    updateAiFeedbackForSelection();
+    if (domEl.applyAiBtn) {
+        domEl.applyAiBtn.textContent = '✨ APPLY SMART TUNING';
+        domEl.applyAiBtn.classList.add('ready');
+    }
+    if (domEl.applyAiAllBtn && aiRecommendationMap.size > 0) {
+        domEl.applyAiAllBtn.classList.add('ready');
+    }
+}
+
+async function getAI(metrics, fileId, fileName, options = {}) {
+    const { skipFeedback = false, batchMode = false } = options;
     const key = (localStorage.getItem('groq_api_key') || '').trim();
     const fbEl     = domEl.aiFeedback;
     const recList  = domEl.aiRecList;
     const applyBtn = domEl.applyAiBtn;
 
-    currentRecJSON = null;
+    if (!fileId && currentSelectedFileId) fileId = currentSelectedFileId;
 
     if (!key || !key.startsWith('gsk_')) {
-        fbEl.textContent = 'Groq API 키가 설정되지 않아 AI 조언을 제공하지 않습니다. 우측 상단의 ⚙️ 버튼을 눌러 API 키를 설정해주세요.';
-        applyBtn.textContent = 'API 키 필요';
-        applyBtn.classList.remove('ready');
+        if (!batchMode) {
+            fbEl.textContent = 'Groq API 키가 설정되지 않아 AI 조언을 제공하지 않습니다. 우측 상단의 ⚙️ 버튼을 눌러 API 키를 설정해주세요.';
+            applyBtn.textContent = 'API 키 필요';
+            applyBtn.classList.remove('ready');
+        }
         return;
     }
 
-    fbEl.textContent = '🤖 ANALYZING FREQUENCY & SOUND SPECTRUM...';
-    recList.textContent = 'AI가 오디오 주파수 밸런스 및 미디 데이터를 진단하고 있습니다...';
-    applyBtn.textContent = '진단 중...';
-    applyBtn.classList.remove('ready');
+    if (!skipFeedback && fileId === currentSelectedFileId) {
+        fbEl.textContent = fileName
+            ? `🤖 분석 중: ${fileName}`
+            : '🤖 ANALYZING FREQUENCY & SOUND SPECTRUM...';
+    }
+    if (!batchMode && fileId === currentSelectedFileId) {
+        applyBtn.textContent = '진단 중...';
+        applyBtn.classList.remove('ready');
+    }
 
     try {
         const presetLabel = document.getElementById('quality-preset').selectedOptions[0].text;
@@ -2359,40 +3269,41 @@ REQUIRED JSON KEYS: "advice", "multiband", "punchy_bass", "super_res", "brillian
         };
 
         currentRecJSON = safe;
-        
-        // ✅ 추가: AI 추천값을 맵에 저장
-        if (currentSelectedFileId) {
-            aiRecommendationMap.set(currentSelectedFileId, safe);
-            console.log('AI Recommendation saved for:', currentSelectedFileId, safe);
+
+        if (fileId) {
+            aiRecommendationMap.set(fileId, safe);
+            if (parsed.advice) aiAdviceMap.set(fileId, parsed.advice);
+            console.log('AI Recommendation saved:', fileId, safe);
         }
-        
-        fbEl.textContent = parsed.advice || 'AI 음향 분석이 성공적으로 마무리되었습니다.';
-        fbEl.style.color = 'var(--text)';
-        recList.innerHTML = `<div style="line-height:1.8;">
-            🎛 Multiband Glue: ${safe.multiband}<br>
-            🔊 Punchy Bass: ${safe.punchy_bass}<br>
-            ✨ Super Resolution: ${safe.super_res}<br>
-            🌟 Brilliance: ${safe.brilliance}<br>
-            🎧 Stereo Width: ${safe.stereo}<br>
-            🚨 Limiter Level: ${safe.limiter}
-        </div>`;
-        applyBtn.textContent = '✨ APPLY SMART TUNING';
-        applyBtn.classList.add('ready');
+
+        if (!batchMode || fileId === currentSelectedFileId) {
+            if (!skipFeedback) {
+                fbEl.textContent = parsed.advice || 'AI 음향 분석이 성공적으로 마무리되었습니다.';
+                fbEl.style.color = 'var(--text)';
+            }
+            applyBtn.textContent = '✨ APPLY SMART TUNING';
+            applyBtn.classList.add('ready');
+        }
+
+        renderAllAiRecommendations(currentSelectedFileId);
 
     } catch (err) {
         console.error('AI Error:', err);
-        fbEl.textContent = `AI 분석 실패: ${err.message}`;
-        recList.textContent = 'Fallback 기본 설정 상태입니다.';
-        applyBtn.textContent = 'AI 연동 에러';
-        applyBtn.classList.remove('ready');
+        if (!skipFeedback && (!fileId || fileId === currentSelectedFileId)) {
+            fbEl.textContent = `AI 분석 실패${fileName ? ' (' + fileName + ')' : ''}: ${err.message}`;
+        }
+        if (!batchMode) {
+            renderAllAiRecommendations(currentSelectedFileId);
+            applyBtn.textContent = 'AI 연동 에러';
+            applyBtn.classList.remove('ready');
+        }
     }
 }
 
 // ─────────────────────────────────────────────
 // PLAYBACK & UI CONTROLS
 // ─────────────────────────────────────────────
-document.getElementById('master-play-btn').addEventListener('click', () => {
-    // 메인 파일 재생 시 실시간 프리뷰 루프는 정지
+document.getElementById('master-play-btn').addEventListener('click', async () => {
     stopPreview();
 
     const btn = document.getElementById('master-play-btn');
@@ -2400,15 +3311,16 @@ document.getElementById('master-play-btn').addEventListener('click', () => {
         domEl.oP.pause();
         domEl.rP.pause();
         btn.textContent = '▶';
-    } else {
-        const isR = document.getElementById('ab-toggle-btn').classList.contains('restored');
-        domEl.oP.muted = isR;
-        domEl.rP.muted = !isR;
+        return;
+    }
 
-        domEl.rP.currentTime = domEl.oP.currentTime;
-        domEl.oP.play();
-        domEl.rP.play();
+    try {
+        await syncAndPlayAbPair();
         btn.textContent = '⏸';
+    } catch (err) {
+        console.error('AB playback error:', err);
+        alert('재생할 수 없습니다. Restored 파일 형식을 확인하거나 페이지를 새로고침해 주세요.');
+        btn.textContent = '▶';
     }
 });
 
@@ -2431,11 +3343,7 @@ document.getElementById('ab-toggle-btn').addEventListener('click', () => {
         rStatus.style.color = isR ? 'var(--accent)' : 'var(--text-muted)';
     }
     
-    domEl.oP.muted = isR;
-    domEl.rP.muted = !isR;
-    
-    if (domEl.oP.muted) domEl.oP.volume = 0; else domEl.oP.volume = 1;
-    if (domEl.rP.muted) domEl.rP.volume = 0; else domEl.rP.volume = 1;
+    applyAbPlaybackState(isR);
 });
 
 // 레인지 노브 변경 리스너 전체 바인딩
@@ -2456,6 +3364,9 @@ document.querySelectorAll('.switch input[type="checkbox"]').forEach(chBox => {
 // ─────────────────────────────────────────────
 domEl.zipBtn.addEventListener('click', async () => {
     if (resL.length === 0) return;
+    if (typeof JSZip === 'undefined') {
+        return alert('ZIP 라이브러리(JSZip)를 불러오지 못했습니다. 인터넷 연결을 확인한 뒤 페이지를 새로고침해 주세요.');
+    }
     const btn = domEl.zipBtn;
     btn.textContent = '⏳ ZIP 생성 중...';
     btn.disabled = true;
@@ -2482,14 +3393,7 @@ domEl.zipBtn.addEventListener('click', async () => {
     btn.disabled = false;
 });
 
-domEl.dl.addEventListener('click', () => {
-    const href = domEl.dl.href;
-    setTimeout(() => {
-        try {
-            if (href && href.startsWith('blob:')) URL.revokeObjectURL(href);
-        } catch (e) { /* ignore */ }
-    }, 15000);
-});
+// 다운로드 링크는 exportUrl 전용 — 재생용 playbackUrl 을 revoke 하지 않음
 
 // ─────────────────────────────────────────────
 // WAV ENCODER (디더링 및 16비트 변환)
@@ -2508,12 +3412,46 @@ function bufferToWave(ab, l) {
     s32(0x61746164); s32(len - 44);
     for (let i = 0; i < l; i++) {
         for (let c = 0; c < n; c++) {
-            // 삼각 노이즈 디더링(Triangular Dither) 추가
             const dither = (Math.random() - Math.random()) * (1 / 32768);
             let sample = ab.getChannelData(c)[i] + dither;
             sample = Math.max(-1, Math.min(1, sample));
             const int16 = sample < 0 ? Math.round(sample * 0x8000) : Math.round(sample * 0x7FFF);
             s16(int16);
+        }
+    }
+    return new Blob([buffer], { type: 'audio/wav' });
+}
+
+/** 24-bit PCM WAV — 업샘플 오프라인 출력용 (Float32 → 24bit, 디더 없음) */
+function bufferToWave24(ab, l) {
+    const n = ab.numberOfChannels;
+    const bytesPerSample = 3;
+    const blockAlign = n * bytesPerSample;
+    const dataBytes = l * blockAlign;
+    const len = 44 + dataBytes;
+    const buffer = new ArrayBuffer(len);
+    const view = new DataView(buffer);
+    let p = 0;
+    const s32 = d => { view.setUint32(p, d, true); p += 4; };
+    const s16 = d => { view.setInt16(p, d, true); p += 2; };
+    const write24 = (v) => {
+        let clamped = Math.max(-8388608, Math.min(8388607, v));
+        if (clamped < 0) clamped += 0x1000000;
+        view.setUint8(p++, clamped & 0xff);
+        view.setUint8(p++, (clamped >> 8) & 0xff);
+        view.setUint8(p++, (clamped >> 16) & 0xff);
+    };
+    s32(0x46464952); s32(len - 8); s32(0x45564157);
+    s32(0x20746d66); s32(16); s16(1); s16(n);
+    s32(ab.sampleRate); s32(ab.sampleRate * blockAlign); s16(blockAlign); s16(24);
+    s32(0x61746164); s32(dataBytes);
+    for (let i = 0; i < l; i++) {
+        for (let c = 0; c < n; c++) {
+            let sample = Math.max(-1, Math.min(1, ab.getChannelData(c)[i]));
+            const int24 = sample < 0
+                ? Math.round(sample * 0x800000)
+                : Math.round(sample * 0x7FFFFF);
+            write24(int24);
         }
     }
     return new Blob([buffer], { type: 'audio/wav' });
@@ -2575,10 +3513,8 @@ if (domEl.applyAiBtn) {
             }
 
             const file = lastF[currentIdx];
-            
-            // 오디오 파일 다시 디코딩
-            const arrayBuf = await file.arrayBuffer();
-            const audioBuf = await aCtx.decodeAudioData(arrayBuf);
+
+            const { audioBuf, nativeSr, decodedSr, resampled } = await decodeAudioFile(file, true);
 
             // DSP 체인 순서 및 프리셋 가져오기
             const chainModules = [...dspChain.querySelectorAll('.toggle-container')].map(el => el.dataset.module);
@@ -2591,27 +3527,32 @@ if (domEl.applyAiBtn) {
 
             // 새로운 마스터링 실행
             const restored = await runLegacyDSP(audioBuf, chainModules, presetName);
+            const exportMeta = await encodeMasterToExportBlob(restored, nativeSr);
+            const playbackUrl = createPlaybackUrlFromBuffer(restored);
+            const exportUrl = createExportDownloadUrl(exportMeta.blob);
 
-            // WAV로 변환 및 Blob 생성
-            const blob = bufferToWave(restored, restored.length);
-            const url = URL.createObjectURL(blob);
-            
-            // 기존 URL 해제
-            if (resL[currentIdx].url) {
-                try { URL.revokeObjectURL(resL[currentIdx].url); } catch(e){}
-            }
+            revokeResultURLs(resL[currentIdx]);
 
-            // 결과 업데이트
             resL[currentIdx] = {
                 name: resL[currentIdx].name,
-                url,
-                blob,
+                url: playbackUrl,
+                exportUrl,
+                blob: exportMeta.blob,
                 orig: resL[currentIdx].orig,
                 buffer: restored,
-                origBuffer: audioBuf
+                origBuffer: audioBuf,
+                nativeSampleRate: nativeSr,
+                decodedSampleRate: decodedSr,
+                resampled,
+                exportSampleRate: exportMeta.exportSampleRate,
+                upsampled: exportMeta.upsampled,
+                resampleEngine: exportMeta.resampleEngine,
+                truePeakDb: exportMeta.truePeakDb,
+                tpCeilingDb: exportMeta.tpCeilingDb,
+                tpLimited: exportMeta.tpLimited
             };
 
-            // UI 갱신 (파형, 메트릭, AI 분석 재표시)
+            renderBatchList();
             await showResult(currentIdx);
             
             alert('✨ AI 추천값 적용 및 마스터링 완료!');
@@ -2657,34 +3598,36 @@ if (domEl.applyAiAllBtn) {
                 
 
                 try {
-                    // 오디오 파일 디코딩
-                    const arrayBuf = await file.arrayBuffer();
-                    const audioBuf = await aCtx.decodeAudioData(arrayBuf);
+                    const { audioBuf, nativeSr, decodedSr, resampled } = await decodeAudioFile(file, true);
 
-                    // 파라미터 적용
                     const params = convertRecommendationToParameters(rec);
                     fileParameterMap.set(fileId, params);
+                    loadSavedParameters(fileId);
 
-                    // 마스터링 실행
                     const restored = await runLegacyDSP(audioBuf, chainModules, presetName);
+                    const exportMeta = await encodeMasterToExportBlob(restored, nativeSr);
+                    const playbackUrl = createPlaybackUrlFromBuffer(restored);
+                    const exportUrl = createExportDownloadUrl(exportMeta.blob);
 
-                    // WAV 변환
-                    const blob = bufferToWave(restored, restored.length);
-                    const url = URL.createObjectURL(blob);
+                    revokeResultURLs(resL[idx]);
 
-                    // 기존 URL 해제
-                    if (resL[idx].url) {
-                        try { URL.revokeObjectURL(resL[idx].url); } catch(e){}
-                    }
-
-                    // 결과 업데이트
                     resL[idx] = {
                         name: resL[idx].name,
-                        url,
-                        blob,
+                        url: playbackUrl,
+                        exportUrl,
+                        blob: exportMeta.blob,
                         orig: resL[idx].orig,
                         buffer: restored,
-                        origBuffer: audioBuf
+                        origBuffer: audioBuf,
+                        nativeSampleRate: nativeSr,
+                        decodedSampleRate: decodedSr,
+                        resampled,
+                        exportSampleRate: exportMeta.exportSampleRate,
+                        upsampled: exportMeta.upsampled,
+                        resampleEngine: exportMeta.resampleEngine,
+                        truePeakDb: exportMeta.truePeakDb,
+                        tpCeilingDb: exportMeta.tpCeilingDb,
+                        tpLimited: exportMeta.tpLimited
                     };
 
                 } catch (err) {
@@ -2692,10 +3635,10 @@ if (domEl.applyAiAllBtn) {
                 }
             }
 
-            // 마지막 파일 표시
+            renderBatchList();
             if (currentSelectedFileId) {
-                const lastIdx = resL.length - 1;
-                await showResult(lastIdx);
+                const selIdx = resL.findIndex((_, i) => makeFileId(lastF[i]) === currentSelectedFileId);
+                await showResult(selIdx >= 0 ? selIdx : 0);
             }
 
             alert('🎉 모든 음원 AI 추천값 적용 및 마스터링 완료!');
@@ -2711,7 +3654,7 @@ if (domEl.applyAiAllBtn) {
     });
 }
 
-console.log('NOVA MULTI FILE AI SYSTEM ENABLED');
+console.log('NOVA: SoX WASM resample · True Peak limiter · offline export pipeline');
 
 
 </script>
