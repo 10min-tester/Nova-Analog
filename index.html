@@ -1616,8 +1616,8 @@ async function bufferToWavArrayBuffer(audioBuffer) {
     return await blob.arrayBuffer();
 }
 
-async function decodeWavArrayBuffer(arrayBuffer) {
-    const ctx = await getDecodeContext(null);
+async function decodeWavArrayBuffer(arrayBuffer, targetSampleRate) {
+    const ctx = await getDecodeContext(targetSampleRate || null);
     return await ctx.decodeAudioData(arrayBuffer.slice(0));
 }
 
@@ -1644,7 +1644,7 @@ async function resampleBufferWithSox(buffer, targetSampleRate) {
     const wavAb = outBytes instanceof ArrayBuffer
         ? outBytes
         : outBytes.buffer.slice(outBytes.byteOffset, outBytes.byteOffset + outBytes.byteLength);
-    const decoded = await decodeWavArrayBuffer(wavAb);
+    const decoded = await decodeWavArrayBuffer(wavAb, targetSampleRate);
     if (Math.abs(decoded.sampleRate - targetSampleRate) > 2) {
         console.warn('[SoX] SR mismatch, browser 보정:', decoded.sampleRate, '→', targetSampleRate);
         return await resampleBuffer(decoded, targetSampleRate);
@@ -1748,10 +1748,10 @@ function resolveExportSampleRate(sourceRate) {
     let target = parseInt(mode, 10);
     if (!Number.isFinite(target) || target <= sourceRate) return null;
 
-    const fallbacks = [target, 192000, 96000, 48000]
+    const fallbacks = [target, 96000, 48000]
         .filter((sr, i, arr) => arr.indexOf(sr) === i)
         .filter(sr => sr > sourceRate)
-        .sort((a, b) => b - a);
+        .sort((a, b) => a - b);  // 오름차순: 선택값 우선, 안 되면 낮은 쪽으로
 
     for (const sr of fallbacks) {
         const clamped = clampSampleRate(sr);
