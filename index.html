@@ -915,7 +915,7 @@
 const PRESET_MAP = {
     music_balanced: {
         vals: { "opt-highpass": true, "val-highpass": 75, "opt-multiband": true, "val-multiband": 55, "opt-punchy-bass": true, "val-punchy-bass": 30, "opt-super-res": true, "val-super-res": 50, "opt-brilliance": true, "val-brilliance": 45, "opt-stereo": true, "val-stereo": 60, "opt-limiter": true, "val-limiter": 50, "opt-match-volume": true },
-        order: ["highpass","multiband","punchy_bass","super_res","brilliance","stereo","limiter"]
+        order: ["highpass","punchy_bass","multiband","super_res","brilliance","stereo","limiter"]
     },
     voice_clean: {
         vals: { "opt-highpass": true, "val-highpass": 100, "opt-multiband": true, "val-multiband": 40, "opt-punchy-bass": false, "val-punchy-bass": 0, "opt-super-res": true, "val-super-res": 30, "opt-brilliance": false, "val-brilliance": 0, "opt-stereo": false, "val-stereo": 0, "opt-limiter": true, "val-limiter": 40, "opt-match-volume": true },
@@ -926,19 +926,26 @@ const PRESET_MAP = {
         order: ["highpass","multiband","super_res","limiter"]
     },
     compressed_repair: {
-        vals: { "opt-highpass": true, "val-highpass": 50, "opt-multiband": true, "val-multiband": 70, "opt-punchy-bass": true, "val-punchy-bass": 50, "opt-super-res": true, "val-super-res": 70, "opt-brilliance": true, "val-brilliance": 60, "opt-stereo": true, "val-stereo": 40, "opt-limiter": true, "val-limiter": 60, "opt-match-volume": true },
-        order: ["highpass","multiband","super_res","punchy_bass","brilliance","stereo","limiter"]
+        // 압축 손상 복원: 멀티밴드 압축 최소화, super_res·brilliance로 손실 고역 복원 집중
+        // punchy_bass는 압축으로 뭉개진 저역 복구용 소량, 리미터 낮게 유지해 추가 압축 방지
+        vals: { "opt-highpass": true, "val-highpass": 40, "opt-multiband": true, "val-multiband": 30, "opt-punchy-bass": true, "val-punchy-bass": 25, "opt-super-res": true, "val-super-res": 75, "opt-brilliance": true, "val-brilliance": 65, "opt-stereo": true, "val-stereo": 35, "opt-limiter": true, "val-limiter": 40, "opt-match-volume": true },
+        order: ["highpass","super_res","brilliance","punchy_bass","multiband","stereo","limiter"]
     },
     asmr_field: {
         vals: { "opt-highpass": true, "val-highpass": 30, "opt-multiband": true, "val-multiband": 45, "opt-punchy-bass": false, "val-punchy-bass": 0, "opt-super-res": true, "val-super-res": 80, "opt-brilliance": true, "val-brilliance": 70, "opt-stereo": true, "val-stereo": 80, "opt-limiter": true, "val-limiter": 40, "opt-match-volume": true },
         order: ["highpass","multiband","super_res","brilliance","stereo","limiter"]
     },
     lowfi_restore: {
-        vals: { "opt-highpass": true, "val-highpass": 120, "opt-multiband": true, "val-multiband": 65, "opt-punchy-bass": false, "val-punchy-bass": 0, "opt-super-res": true, "val-super-res": 75, "opt-brilliance": true, "val-brilliance": 55, "opt-stereo": false, "val-stereo": 0, "opt-limiter": true, "val-limiter": 35, "opt-match-volume": true },
-        order: ["highpass","multiband","super_res","brilliance","limiter"]
+        // 로우파이 복원: 저역 보존을 위해 highpass를 60Hz로 낮춤
+        // 약한 스테레오 공간감 추가로 디지털화 질감 부여, super_res·brilliance로 고역 복원
+        vals: { "opt-highpass": true, "val-highpass": 60, "opt-multiband": true, "val-multiband": 55, "opt-punchy-bass": false, "val-punchy-bass": 0, "opt-super-res": true, "val-super-res": 75, "opt-brilliance": true, "val-brilliance": 55, "opt-stereo": true, "val-stereo": 30, "opt-limiter": true, "val-limiter": 35, "opt-match-volume": true },
+        order: ["highpass","multiband","super_res","brilliance","stereo","limiter"]
     },
     telephone_clarity: {
-        vals: { "opt-highpass": true, "val-highpass": 140, "opt-multiband": true, "val-multiband": 80, "opt-punchy-bass": false, "val-punchy-bass": 0, "opt-super-res": true, "val-super-res": 85, "opt-brilliance": true, "val-brilliance": 70, "opt-stereo": false, "val-stereo": 0, "opt-limiter": true, "val-limiter": 30, "opt-match-volume": true },
+        // 전화음 명료화: 좁은 대역폭 복원이 목적이므로 고역 손실 복구(super_res·brilliance) 강하게
+        // highpass는 전화 특성(300Hz)을 반영하되 과도하게 자르지 않음 (복원용)
+        // comp_ratio를 낮춰 과압축 방지, stereo는 끄고 모노 선명도 우선
+        vals: { "opt-highpass": true, "val-highpass": 80, "opt-multiband": true, "val-multiband": 55, "opt-punchy-bass": false, "val-punchy-bass": 0, "opt-super-res": true, "val-super-res": 90, "opt-brilliance": true, "val-brilliance": 80, "opt-stereo": false, "val-stereo": 0, "opt-limiter": true, "val-limiter": 45, "opt-match-volume": true },
         order: ["highpass","multiband","super_res","brilliance","limiter"]
     },
     vinyl_digital: {
@@ -948,14 +955,50 @@ const PRESET_MAP = {
 };
 
 const PROFILES = {
-    music_balanced:    { sr_gain: 2.5, br_gain: 3.0, pb_gain: 2.5, st_mul: 0.9,  lim_mul: 0.92, warmth: 1.2, comp_thresh: -18, comp_ratio: 2.5, comp_attack: 0.01, comp_release: 0.15 },
-    voice_clean:       { sr_gain: 2.0, br_gain: 1.5, pb_gain: 0,   st_mul: 0.3,  lim_mul: 0.88, warmth: 0.5, comp_thresh: -20, comp_ratio: 3.0, comp_attack: 0.005,comp_release: 0.10 },
-    podcast_pro:       { sr_gain: 3.5, br_gain: 4.0, pb_gain: 0,   st_mul: 0.7,  lim_mul: 0.85, warmth: 0.8, comp_thresh: -22, comp_ratio: 3.5, comp_attack: 0.008,comp_release: 0.12 },
-    compressed_repair: { sr_gain: 3.8, br_gain: 4.5, pb_gain: 4.0, st_mul: 0.8,  lim_mul: 0.88, warmth: 1.8, comp_thresh: -15, comp_ratio: 2.0, comp_attack: 0.015,comp_release: 0.20 },
-    asmr_field:        { sr_gain: 4.0, br_gain: 4.2, pb_gain: 0,   st_mul: 0.85, lim_mul: 0.90, warmth: 1.0, comp_thresh: -24, comp_ratio: 1.8, comp_attack: 0.02, comp_release: 0.25 },
-    lowfi_restore:     { sr_gain: 4.2, br_gain: 4.8, pb_gain: 0,   st_mul: 0.5,  lim_mul: 0.80, warmth: 0.5, comp_thresh: -16, comp_ratio: 2.2, comp_attack: 0.01, comp_release: 0.18 },
-    telephone_clarity: { sr_gain: 4.5, br_gain: 5.0, pb_gain: 0,   st_mul: 0.3,  lim_mul: 0.75, warmth: 0.3, comp_thresh: -20, comp_ratio: 4.0, comp_attack: 0.005,comp_release: 0.08 },
-    vinyl_digital:     { sr_gain: 3.0, br_gain: 3.5, pb_gain: 2.0, st_mul: 0.85, lim_mul: 0.90, warmth: 1.5, comp_thresh: -17, comp_ratio: 2.3, comp_attack: 0.012,comp_release: 0.16 }
+    // sr_gain: 고역 하모닉 익사이터 게인 / br_gain: brilliance 고역쉘프 게인
+    // pb_gain: punchy bass 추가 게인 / st_mul: stereo side 폭 승수
+    // lim_mul: 리미터 오프셋 계수 / warmth: 250Hz 로우쉘프 게인
+    // comp_thresh/ratio/attack/release: 멀티밴드 각 대역 기준값
+    music_balanced:    { sr_gain: 0.8, br_gain: 0.6, pb_gain: 0.5, st_mul: 0.9,  lim_mul: 0.92, warmth: 1.2,
+                         // 대역별 컴프레서: 저역 펀치 보존 / 중역 보컬 투명도 / 고역 섬세한 터치
+                         lComp: { thresh: -22, ratio: 2.5, attack: 0.010, release: 0.20 },
+                         mComp: { thresh: -20, ratio: 2.0, attack: 0.006, release: 0.10 },
+                         hComp: { thresh: -18, ratio: 1.8, attack: 0.004, release: 0.05 } },
+    voice_clean:       { sr_gain: 0.5, br_gain: 0.3, pb_gain: 0,   st_mul: 0.3,  lim_mul: 0.88, warmth: 0.5,
+                         // 보컬 명료도 우선: 중역을 가볍게, 저역 터짐 방지
+                         lComp: { thresh: -24, ratio: 3.0, attack: 0.005, release: 0.15 },
+                         mComp: { thresh: -18, ratio: 2.0, attack: 0.004, release: 0.08 },
+                         hComp: { thresh: -22, ratio: 1.5, attack: 0.003, release: 0.04 } },
+    podcast_pro:       { sr_gain: 1.0, br_gain: 0.8, pb_gain: 0,   st_mul: 0.7,  lim_mul: 0.85, warmth: 0.8,
+                         // 팟캐스트: 중저역 단단하게, 고역은 치찰음 억제
+                         lComp: { thresh: -26, ratio: 3.5, attack: 0.008, release: 0.18 },
+                         mComp: { thresh: -22, ratio: 3.0, attack: 0.005, release: 0.09 },
+                         hComp: { thresh: -20, ratio: 2.0, attack: 0.003, release: 0.04 } },
+    compressed_repair: { sr_gain: 1.2, br_gain: 0.9, pb_gain: 0.4, st_mul: 0.8,  lim_mul: 0.92, warmth: 1.8,
+                         // 압축 복원: 멀티밴드 압축 최소화, 각 대역 매우 가볍게만 터치
+                         lComp: { thresh: -16, ratio: 1.5, attack: 0.020, release: 0.25 },
+                         mComp: { thresh: -14, ratio: 1.3, attack: 0.010, release: 0.12 },
+                         hComp: { thresh: -12, ratio: 1.2, attack: 0.006, release: 0.05 } },
+    asmr_field:        { sr_gain: 1.3, br_gain: 0.8, pb_gain: 0,   st_mul: 0.85, lim_mul: 0.90, warmth: 1.0,
+                         // ASMR: 거의 압축 없이 자연스러운 다이나믹 유지
+                         lComp: { thresh: -24, ratio: 1.5, attack: 0.025, release: 0.30 },
+                         mComp: { thresh: -26, ratio: 1.3, attack: 0.015, release: 0.15 },
+                         hComp: { thresh: -28, ratio: 1.2, attack: 0.008, release: 0.06 } },
+    lowfi_restore:     { sr_gain: 1.4, br_gain: 0.9, pb_gain: 0,   st_mul: 0.5,  lim_mul: 0.80, warmth: 0.5,
+                         // 로우파이 복원: 저역 살리고, 중/고역 손실 보강
+                         lComp: { thresh: -18, ratio: 2.0, attack: 0.015, release: 0.22 },
+                         mComp: { thresh: -20, ratio: 1.8, attack: 0.008, release: 0.10 },
+                         hComp: { thresh: -16, ratio: 1.5, attack: 0.005, release: 0.05 } },
+    telephone_clarity: { sr_gain: 1.5, br_gain: 1.0, pb_gain: 0,   st_mul: 0.3,  lim_mul: 0.80, warmth: 0.3,
+                         // 전화음 명료화: 중역 선명하게, 고역 복원 우선, 과압축 방지
+                         lComp: { thresh: -20, ratio: 2.0, attack: 0.008, release: 0.15 },
+                         mComp: { thresh: -16, ratio: 2.5, attack: 0.004, release: 0.08 },
+                         hComp: { thresh: -18, ratio: 1.8, attack: 0.003, release: 0.04 } },
+    vinyl_digital:     { sr_gain: 1.0, br_gain: 0.7, pb_gain: 0.4, st_mul: 0.85, lim_mul: 0.90, warmth: 1.5,
+                         // 바이닐 디지털화: 저역 따뜻하게, 고역 손실 복원, 스테레오 공간감
+                         lComp: { thresh: -18, ratio: 2.2, attack: 0.012, release: 0.20 },
+                         mComp: { thresh: -20, ratio: 1.8, attack: 0.008, release: 0.10 },
+                         hComp: { thresh: -16, ratio: 1.5, attack: 0.005, release: 0.05 } }
 };
 
 const SAFETY_THRESHOLDS = {
@@ -1032,12 +1075,12 @@ const domEl = {
 // ─────────────────────────────────────────────
 // HELPERS: Resource cleanup
 // ─────────────────────────────────────────────
-function revokeResultURLs(r) {
+function revokeResultURLs(r, keepOrig = false) {
     try {
         if (!r) return;
         if (r.url) { try { URL.revokeObjectURL(r.url); } catch (e) { console.warn('revoke url failed', e); } }
         if (r.exportUrl) { try { URL.revokeObjectURL(r.exportUrl); } catch (e) { console.warn('revoke exportUrl failed', e); } }
-        if (r.orig) { try { URL.revokeObjectURL(r.orig); } catch (e) { console.warn('revoke orig failed', e); } }
+        if (!keepOrig && r.orig) { try { URL.revokeObjectURL(r.orig); } catch (e) { console.warn('revoke orig failed', e); } }
     } catch (e) { console.warn('revokeResultURLs error', e); }
 }
 
@@ -1317,6 +1360,9 @@ function applyPreset(presetName) {
     // 3. 볼륨 매치는 항상 마지막 노드로 이동
     const mv = chain.querySelector('[data-module="match_volume"]');
     if (mv) chain.appendChild(mv);
+
+    // 4. 프리셋 변경 사항을 현재 파일에 저장
+    saveCurrentFileParameters();
 
     // 실시간 프리뷰를 켜둔 상태에서 프리셋이 변하면 프리뷰 그래프 재생성
     if (previewState.isPlaying) {
@@ -1748,16 +1794,9 @@ function resolveExportSampleRate(sourceRate) {
     let target = parseInt(mode, 10);
     if (!Number.isFinite(target) || target <= sourceRate) return null;
 
-    const fallbacks = [target, 96000, 48000]
-        .filter((sr, i, arr) => arr.indexOf(sr) === i)
-        .filter(sr => sr > sourceRate)
-        .sort((a, b) => a - b);  // 오름차순: 선택값 우선, 안 되면 낮은 쪽으로
-
-    for (const sr of fallbacks) {
-        const clamped = clampSampleRate(sr);
-        if (clamped <= sourceRate) continue;
-        if (canUseOfflineSampleRate(clamped)) return clamped;
-    }
+    const clamped = clampSampleRate(target);
+    if (clamped <= sourceRate) return null;
+    if (canUseOfflineSampleRate(clamped)) return clamped;
     return null;
 }
 
@@ -1882,7 +1921,7 @@ async function decodeAudioFile(file, useMainContext = true) {
 function updateSampleRateDisplay(r) {
     if (!domEl.srDisplay || !r) return;
     const native = r.nativeSampleRate || r.origBuffer?.sampleRate;
-    const proc = r.buffer?.sampleRate;
+    const proc = r.exportSampleRate || r.buffer?.sampleRate;
     let text = native ? `Sample rate: ${Math.round(native)} Hz (원본)` : 'Sample rate: —';
     if (proc && native && Math.abs(proc - native) > 1) {
         text += ` → 출력 ${Math.round(proc)} Hz`;
@@ -1926,8 +1965,12 @@ function renderAllAiRecommendations(activeFileId) {
         const fileId = makeFileId(file);
         const rec = aiRecommendationMap.get(fileId);
         const isActive = fileId === activeFileId;
-        const sr = r.nativeSampleRate || r.origBuffer?.sampleRate;
-        const srBadge = sr ? `${Math.round(sr)} Hz` : '—';
+        const native = r.nativeSampleRate || r.origBuffer?.sampleRate;
+        const exported = r.exportSampleRate || r.buffer?.sampleRate;
+        const displaySr = (r.upsampled && exported) ? exported : native;
+        const srBadge = displaySr
+            ? `${Math.round(displaySr)} Hz${r.upsampled ? ' ↑' : ''}`
+            : '—';
         const pending = !rec;
         return `<div class="ai-rec-card ${isActive ? 'active' : ''} ${pending ? 'pending' : ''}" data-ai-index="${i}" title="${file.name}">
             <div class="ai-rec-card-head">
@@ -2080,8 +2123,9 @@ function createMSWidenerNode(ctx, value, profile) {
     sideDelay.delayTime.value = 0.004; // 4ms 미세 지연 고정
     
     const sideWidthGain = ctx.createGain();
-    // 초기 설정값 적용 (Side 성분 증폭 강도)
-    sideWidthGain.gain.value = 0.2 + (value * 1.6); 
+    // 초기 설정값 적용 (Side 성분 증폭 강도) - profile.st_mul 반영
+    const stMultiplier = profile.st_mul || 1.0;
+    sideWidthGain.gain.value = (0.2 + (value * 1.6)) * stMultiplier; 
     
     sideSum.connect(sideDelay);
     sideDelay.connect(sideWidthGain);
@@ -2291,23 +2335,28 @@ async function runLegacyDSP(buffer, chainOrder, presetName) {
                     const mP1 = createLR4(320, 'highpass');
                     const mP2 = createLR4(3200, 'lowpass');
 
-                    const lC = off.createDynamicsCompressor(); 
-                    lC.threshold.value = profile.comp_thresh || -12; 
-                    lC.ratio.value = profile.comp_ratio || 2; 
-                    lC.attack.value = profile.comp_attack || 0.03;
-                    lC.release.value = 0.20; // 저역 펀치감 보존
+                    // 대역별 독립 컴프레서 파라미터 (PROFILES.lComp/mComp/hComp 우선, 없으면 구버전 폴백)
+                    const lCfg = profile.lComp || { thresh: profile.comp_thresh || -18, ratio: profile.comp_ratio || 2.5, attack: profile.comp_attack || 0.01, release: 0.20 };
+                    const mCfg = profile.mComp || { thresh: (profile.comp_thresh || -18) + 2, ratio: Math.max(1.2, (profile.comp_ratio || 2.5) - 0.4), attack: profile.comp_attack || 0.01, release: 0.10 };
+                    const hCfg = profile.hComp || { thresh: (profile.comp_thresh || -18) - 2, ratio: Math.max(1.1, (profile.comp_ratio || 2.5) - 0.6), attack: profile.comp_attack || 0.01, release: 0.05 };
 
-                    const mC = off.createDynamicsCompressor(); 
-                    mC.threshold.value = (profile.comp_thresh || -12) + 2; 
-                    mC.ratio.value = Math.max(1.2, (profile.comp_ratio || 2) - 0.4);
-                    mC.attack.value = profile.comp_attack || 0.03;
-                    mC.release.value = 0.10; // 중역 보컬 명료도
+                    const lC = off.createDynamicsCompressor();
+                    lC.threshold.value = lCfg.thresh;
+                    lC.ratio.value     = lCfg.ratio;
+                    lC.attack.value    = lCfg.attack;
+                    lC.release.value   = lCfg.release;
 
-                    const hC = off.createDynamicsCompressor(); 
-                    hC.threshold.value = (profile.comp_thresh || -12) - 2; 
-                    hC.ratio.value = Math.max(1.1, (profile.comp_ratio || 2) - 0.6);
-                    hC.attack.value = profile.comp_attack || 0.03;
-                    hC.release.value = 0.05; // 고역 팅글 극대화
+                    const mC = off.createDynamicsCompressor();
+                    mC.threshold.value = mCfg.thresh;
+                    mC.ratio.value     = mCfg.ratio;
+                    mC.attack.value    = mCfg.attack;
+                    mC.release.value   = mCfg.release;
+
+                    const hC = off.createDynamicsCompressor();
+                    hC.threshold.value = hCfg.thresh;
+                    hC.ratio.value     = hCfg.ratio;
+                    hC.attack.value    = hCfg.attack;
+                    hC.release.value   = hCfg.release;
 
                     const mbM = off.createGain();
                     mbM.gain.value = 0.85; // 대역 합산 효율 최적화
@@ -2590,31 +2639,31 @@ async function startPreview() {
     const mP1 = createLR4(320, 'highpass');
     const mP2 = createLR4(3200, 'lowpass');
 
-    // [동적 연동 반영] 하드코딩 상수를 지우고 profile 파라미터를 유기적으로 결합
-    const lC = ctx.createDynamicsCompressor(); 
-    lC.threshold.value = profile.comp_thresh; 
-    lC.ratio.value = profile.comp_ratio; 
-    lC.attack.value = profile.comp_attack;
-    lC.release.value = profile.comp_release;
+    // 대역별 독립 컴프레서 (PROFILES.lComp/mComp/hComp 사용, 구버전 폴백 포함)
+    const lCfg = profile.lComp || { thresh: profile.comp_thresh || -18, ratio: profile.comp_ratio || 2.5, attack: profile.comp_attack || 0.01, release: 0.20 };
+    const mCfg = profile.mComp || { thresh: (profile.comp_thresh || -18) + 2, ratio: Math.max(1.2, (profile.comp_ratio || 2.5) - 0.4), attack: profile.comp_attack || 0.01, release: 0.10 };
+    const hCfg = profile.hComp || { thresh: (profile.comp_thresh || -18) - 2, ratio: Math.max(1.1, (profile.comp_ratio || 2.5) - 0.6), attack: profile.comp_attack || 0.01, release: 0.05 };
 
-    const mC = ctx.createDynamicsCompressor(); 
-    mC.threshold.value = profile.comp_thresh + 2; 
-    mC.ratio.value = Math.max(1.2, profile.comp_ratio - 0.4);
-    mC.attack.value = profile.comp_attack;
-    mC.release.value = profile.comp_release;
+    const lC = ctx.createDynamicsCompressor();
+    lC.threshold.value = lCfg.thresh;
+    lC.ratio.value     = lCfg.ratio;
+    lC.attack.value    = lCfg.attack;
+    lC.release.value   = lCfg.release;
 
-    const hC = ctx.createDynamicsCompressor(); 
-    hC.threshold.value = profile.comp_thresh - 2; 
-    hC.ratio.value = Math.max(1.1, profile.comp_ratio - 0.6);
-    hC.attack.value = profile.comp_attack;
-    hC.release.value = profile.comp_release;
+    const mC = ctx.createDynamicsCompressor();
+    mC.threshold.value = mCfg.thresh;
+    mC.ratio.value     = mCfg.ratio;
+    mC.attack.value    = mCfg.attack;
+    mC.release.value   = mCfg.release;
+
+    const hC = ctx.createDynamicsCompressor();
+    hC.threshold.value = hCfg.thresh;
+    hC.ratio.value     = hCfg.ratio;
+    hC.attack.value    = hCfg.attack;
+    hC.release.value   = hCfg.release;
 
     const mbM = ctx.createGain();
     mbM.gain.value = 0.85;
-
-    lC.release.value = 0.20;
-    mC.release.value = 0.10;
-    hC.release.value = 0.05;
 
     activeGain.connect(lP[0]); lP[1].connect(lC); lC.connect(mbM);
     activeGain.connect(hP[0]); hP[1].connect(hC); hC.connect(mbM);
@@ -3031,11 +3080,11 @@ domEl.batchList.addEventListener('click', e => {
 function initWaveSurfer(containerId, mediaEl, url, color) {
     const container = document.getElementById(containerId);
     container.innerHTML = '';
-    return WaveSurfer.create({
+    const ws = WaveSurfer.create({
         container,
+        url,
         waveColor: 'rgba(255,255,255,0.1)',
         progressColor: color,
-        url,
         media: mediaEl,
         height: 80,
         barWidth: 2,
@@ -3044,8 +3093,11 @@ function initWaveSurfer(containerId, mediaEl, url, color) {
         normalize: true,
         fillParent: true,
         autoCenter: true,
-        dragToSeek: true
+        dragToSeek: true,
+        backend: 'MediaElement',
+        mediaControls: false
     });
+    return ws;
 }
 
 const formatTime = s => {
@@ -3060,28 +3112,23 @@ const formatTime = s => {
 async function showResult(idx) {
     const r = resL[idx];
     previewState.buffer = r.origBuffer;
-    
+
     // ✅ 추가: 현재 파일 ID 저장
     currentSelectedFileId = makeFileId(lastF[idx]);
     loadSavedParameters(currentSelectedFileId);
     console.log('Selected File ID:', currentSelectedFileId);
-    
+
     if (previewState.isPlaying) {
         startPreview();
     }
-    
+
     [...domEl.batchList.children].forEach((el, i) => el.classList.toggle('active', i === idx));
 
     domEl.result.style.display = 'block';
-    
+
     requestAnimationFrame(async () => {
         if (wsO) { try { wsO.destroy(); } catch(e){} wsO = null; }
         if (wsR) { try { wsR.destroy(); } catch(e){} wsR = null; }
-
-        domEl.oP.src = r.orig;
-        domEl.rP.src = r.url;
-        domEl.oP.load();
-        domEl.rP.load();
 
         const isRestored = document.getElementById('ab-toggle-btn').classList.contains('restored');
         applyAbPlaybackState(isRestored);
@@ -3093,7 +3140,7 @@ async function showResult(idx) {
 
         oLabel.classList.toggle('active', !isRestored);
         rLabel.classList.toggle('active', isRestored);
-        
+
         if (oStatus && rStatus) {
             oStatus.textContent = isRestored ? 'READY' : 'ACTIVE';
             oStatus.style.color = isRestored ? 'var(--text-muted)' : 'var(--accent)';
@@ -3531,7 +3578,7 @@ if (domEl.applyAiBtn) {
             const playbackUrl = createPlaybackUrlFromBuffer(restored);
             const exportUrl = createExportDownloadUrl(exportMeta.blob);
 
-            revokeResultURLs(resL[currentIdx]);
+            revokeResultURLs(resL[currentIdx], true);
 
             resL[currentIdx] = {
                 name: resL[currentIdx].name,
@@ -3609,7 +3656,7 @@ if (domEl.applyAiAllBtn) {
                     const playbackUrl = createPlaybackUrlFromBuffer(restored);
                     const exportUrl = createExportDownloadUrl(exportMeta.blob);
 
-                    revokeResultURLs(resL[idx]);
+                    revokeResultURLs(resL[idx], true);
 
                     resL[idx] = {
                         name: resL[idx].name,
