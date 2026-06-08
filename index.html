@@ -334,6 +334,7 @@
 
         .apply-ai-btn { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); padding: 10px 20px; border-radius: 100px; font-size: 0.75rem; font-weight: 700; cursor: not-allowed; transition: 0.3s; }
         .apply-ai-btn.ready { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #030408; border: none; cursor: pointer; box-shadow: 0 4px 16px var(--accent-glow); }
+        .simulate-ai-btn.ready { background: rgba(0,240,255,0.08); color: var(--accent); border: 1px solid rgba(0,240,255,0.35); box-shadow: none; }
 
         .ai-rec-grid { display: flex; flex-direction: column; gap: 10px; max-height: 320px; overflow-y: auto; padding-right: 4px; }
         .ai-rec-grid::-webkit-scrollbar { width: 4px; }
@@ -353,6 +354,9 @@
         .ai-rec-card-name { font-size: 0.78rem; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
         .sr-badge { font-family: var(--mono); font-size: 0.62rem; color: var(--accent); background: rgba(0,240,255,0.08); padding: 2px 8px; border-radius: 100px; flex-shrink: 0; }
         .ai-rec-params { font-size: 0.72rem; line-height: 1.65; color: var(--text-muted); font-family: var(--mono); }
+        .ai-rec-state { display: inline-flex; align-items: center; margin-left: 8px; padding: 2px 7px; border-radius: 999px; font-size: 0.64rem; font-weight: 800; letter-spacing: 0.02em; border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap; }
+        .ai-rec-state.draft { color: #ffd166; border-color: rgba(255,209,102,0.36); background: rgba(255,209,102,0.08); }
+        .ai-rec-state.optimized { color: var(--accent); border-color: rgba(79,214,227,0.42); background: rgba(79,214,227,0.08); }
         .sr-info-line { font-size: 0.72rem; color: var(--text-muted); font-family: var(--mono); margin-top: 8px; }
 
         .batch-container { margin-top: 40px; }
@@ -852,6 +856,9 @@
         현재 음원에 적용
     </button>
 
+    <button type="button" id="simulate-ai-btn" class="apply-ai-btn simulate-ai-btn">
+        추천값 최적화
+    </button>
     <button type="button" id="apply-ai-all-btn" class="apply-ai-btn ready">
         전체 음원에 적용
     </button>
@@ -1023,6 +1030,8 @@ let currentRecJSON = null;
 // ─────────────────────────────────────────────
 const aiRecommendationMap = new Map();
 const aiAdviceMap = new Map();
+const aiRecommendationStatusMap = new Map();
+const aiOriginalRecommendationMap = new Map();
 const fileParameterMap = new Map();
 let currentSelectedFileId = null;
 
@@ -1042,7 +1051,10 @@ const previewState = {
     buffers: [],        // 여러 파일의 디코딩된 버퍼 목록
     activeFileIndex: 0, // 현재 프리뷰 중인 파일 인덱스
     presetName: 'music_balanced',
-    activeNodes: {} // GC 방지를 위한 활성 오디오 노드 강한 참조 보관함
+    activeNodes: {}, // GC 방지를 위한 활성 오디오 노드 강한 참조 보관함
+    peakMonitorRaf: null,
+    peakMonitorBuffer: null,
+    peakWarningUntil: 0
 };
 
 const domEl = {
@@ -1058,6 +1070,7 @@ const domEl = {
     statusText: document.getElementById('status-text'),
     applyAiBtn: document.getElementById('apply-ai-btn'),
     applyAiAllBtn: document.getElementById('apply-ai-all-btn'),
+    simulateAiBtn: document.getElementById('simulate-ai-btn'),
 
     aiFeedback: document.getElementById('ai-feedback-text'),
     aiRecList:  document.getElementById('ai-rec-list'),
@@ -1123,11 +1136,92 @@ async function syncAndPlayAbPair() {
     applyAbPlaybackState(isR);
 
     domEl.rP.currentTime = domEl.oP.currentTime;
-    await Promise.all([playAudioElement(domEl.oP), playAudioElement(domEl.rP)]);
+    const activeEl = isR ? domEl.rP : domEl.oP;
+    const inactiveEl = isR ? domEl.oP : domEl.rP;
+    await playAudioElement(activeEl);
+    playAudioElement(inactiveEl).catch((err) => {
+        console.warn('Inactive A/B element could not start; continuing with active playback.', err);
+    });
+}
+
+function ampToDb(amp) {
+    const safe = Math.max(amp || 0, 1e-8);
+    return 20 * Math.log10(safe);
+}
+
+function createPreviewSoftLimitCurve(size = 65536, drive = 1.12, ceiling = 0.985) {
+    const curve = new Float32Array(size);
+    const norm = Math.tanh(drive);
+    for (let i = 0; i < size; i++) {
+        const x = (i * 2) / (size - 1) - 1;
+        curve[i] = (Math.tanh(x * drive) / norm) * ceiling;
+    }
+    return curve;
+}
+
+function getSelectedResultForDisplay() {
+    if (!currentSelectedFileId) return null;
+    const idx = resL.findIndex((_, i) => makeFileId(lastF[i]) === currentSelectedFileId);
+    return idx >= 0 ? resL[idx] : null;
+}
+
+function restoreTruePeakDisplayAfterPreview() {
+    if (typeof updateTruePeakDisplay === 'function') {
+        updateTruePeakDisplay(getSelectedResultForDisplay());
+    } else if (domEl.tpDisplay) {
+        domEl.tpDisplay.textContent = 'True peak: —';
+        domEl.tpDisplay.style.color = '';
+    }
+}
+
+function startPreviewPeakMonitor(analyser) {
+    if (!analyser || !domEl.tpDisplay) return;
+    previewState.peakMonitorBuffer = new Float32Array(analyser.fftSize);
+    const warnDb = -1.0;
+    const hardDb = 0.0;
+
+    const tick = () => {
+        if (!previewState.isPlaying || !previewState.ctx) return;
+
+        analyser.getFloatTimeDomainData(previewState.peakMonitorBuffer);
+        let peak = 0;
+        for (let i = 0; i < previewState.peakMonitorBuffer.length; i++) {
+            const a = Math.abs(previewState.peakMonitorBuffer[i]);
+            if (a > peak) peak = a;
+        }
+
+        const peakDb = ampToDb(peak);
+        const now = performance.now();
+        if (peakDb >= warnDb) {
+            previewState.peakWarningUntil = now + 1800;
+        }
+
+        const holdWarning = now < previewState.peakWarningUntil;
+        const hardWarning = peakDb >= hardDb;
+        const limiterText = holdWarning
+            ? (hardWarning ? ' · limiter heavy' : ' · limiter active')
+            : ' · safe';
+
+        domEl.tpDisplay.textContent = `Preview peak: ${peakDb.toFixed(1)} dBFS${limiterText}`;
+        domEl.tpDisplay.style.color = hardWarning
+            ? '#ff6b6b'
+            : (holdWarning ? '#ffd166' : 'var(--text-muted)');
+
+        previewState.peakMonitorRaf = requestAnimationFrame(tick);
+    };
+
+    tick();
 }
 
 // 실시간 프리뷰 루프 정지 및 오디오 컨텍스트 닫기 (메모리 가비지 컬렉션 강화)
 function stopPreview() {
+    if (previewState.peakMonitorRaf) {
+        cancelAnimationFrame(previewState.peakMonitorRaf);
+        previewState.peakMonitorRaf = null;
+    }
+    previewState.peakMonitorBuffer = null;
+    previewState.peakWarningUntil = 0;
+
     if (previewState.source) {
         try { previewState.source.stop(); } catch(e){}
         try { previewState.source.disconnect(); } catch(e){}
@@ -1148,6 +1242,7 @@ function stopPreview() {
     if (domEl.previewRack) {
         domEl.previewRack.classList.remove('playing');
     }
+    restoreTruePeakDisplayAfterPreview();
 }
 
 async function clearAllResults() {
@@ -1196,6 +1291,8 @@ async function clearAllResults() {
         if (preBatchList) preBatchList.innerHTML = '';
         aiRecommendationMap.clear();
         aiAdviceMap.clear();
+        aiRecommendationStatusMap.clear();
+        aiOriginalRecommendationMap.clear();
         currentSelectedFileId = null;
         if (domEl.aiRecList) domEl.aiRecList.textContent = '처리 완료 후 파라미터 추천이 시작됩니다.';
         if (domEl.srDisplay) domEl.srDisplay.textContent = 'Sample rate: —';
@@ -1282,6 +1379,707 @@ function convertRecommendationToParameters(rec) {
         brilliance: { enabled: true, value: rec.brilliance ?? 45 },
         stereo: { enabled: true, value: rec.stereo ?? 60 },
         limiter: { enabled: true, value: rec.limiter ?? 50 }
+    };
+}
+
+function updateAiSimulationButton() {
+    const hasRecommendation = !!(currentSelectedFileId && aiRecommendationMap.has(currentSelectedFileId));
+    const status = currentSelectedFileId ? aiRecommendationStatusMap.get(currentSelectedFileId) : null;
+    const optimized = status?.stage === 'optimized';
+
+    if (domEl.simulateAiBtn) {
+        domEl.simulateAiBtn.classList.toggle('ready', hasRecommendation);
+        domEl.simulateAiBtn.disabled = !hasRecommendation;
+        domEl.simulateAiBtn.textContent = optimized ? '다시 최적화' : '추천값 최적화';
+    }
+
+    if (domEl.applyAiBtn && domEl.applyAiBtn.dataset.busy !== '1') {
+        if (hasRecommendation) {
+            domEl.applyAiBtn.textContent = optimized ? '최적화값 적용' : 'AI 초안 적용';
+            domEl.applyAiBtn.classList.add('ready');
+            domEl.applyAiBtn.disabled = false;
+        } else {
+            domEl.applyAiBtn.textContent = '추천값 대기';
+            domEl.applyAiBtn.classList.remove('ready');
+            domEl.applyAiBtn.disabled = true;
+        }
+    }
+
+    if (domEl.applyAiAllBtn && domEl.applyAiAllBtn.dataset.busy !== '1') {
+        const hasAnyRecommendation = aiRecommendationMap.size > 0;
+        domEl.applyAiAllBtn.textContent = '전체 현재 추천값 적용';
+        domEl.applyAiAllBtn.classList.toggle('ready', hasAnyRecommendation);
+        domEl.applyAiAllBtn.disabled = !hasAnyRecommendation;
+    }
+}
+
+function formatAiRecommendationState(fileId, rec) {
+    if (!rec) return '<span class="ai-rec-state">대기</span>';
+    const status = aiRecommendationStatusMap.get(fileId);
+    if (status?.stage === 'optimized') {
+        const tp = Number.isFinite(status.truePeakDb) ? ` · ${status.truePeakDb.toFixed(1)} dBTP` : '';
+        const sep = Number.isFinite(status.separationScore) ? ` · SEP ${Math.round(status.separationScore)}` : '';
+        const st = Number.isFinite(status.stereoScore) ? ` · ST ${Math.round(status.stereoScore)}` : '';
+        return `<span class="ai-rec-state optimized">클립 세이프${tp}${sep}${st}</span>`;
+    }
+    return '<span class="ai-rec-state draft">AI 초안</span>';
+}
+
+function applyRecommendationToPreviewControls(rec, fileId = currentSelectedFileId) {
+    const recParams = convertRecommendationToParameters(rec);
+    if (!recParams || !fileId) return false;
+    const previous = fileParameterMap.get(fileId) || captureCurrentParameters();
+    const params = { ...previous, ...recParams };
+    fileParameterMap.set(fileId, params);
+    if (fileId === currentSelectedFileId) {
+        loadSavedParameters(fileId);
+        saveCurrentFileParameters();
+    }
+    return true;
+}
+
+function cloneAiRecommendation(rec) {
+    return {
+        multiband: clampDSP('multiband', rec?.multiband ?? 55),
+        punchy_bass: clampDSP('punchy_bass', rec?.punchy_bass ?? 30),
+        super_res: clampDSP('super_res', rec?.super_res ?? 50),
+        brilliance: clampDSP('brilliance', rec?.brilliance ?? 45),
+        stereo: clampDSP('stereo', rec?.stereo ?? 60),
+        limiter: clampDSP('limiter', rec?.limiter ?? 50)
+    };
+}
+
+function tuneAiRecommendation(rec, patch = {}) {
+    const base = cloneAiRecommendation(rec);
+    const tuned = { ...base };
+    Object.entries(patch).forEach(([key, delta]) => {
+        const raw = typeof delta === 'function' ? delta(base[key]) : base[key] + delta;
+        tuned[key] = clampDSP(key, raw);
+    });
+    return tuned;
+}
+
+function buildAiOptimizationCandidates(rec) {
+    const base = cloneAiRecommendation(rec);
+    return [
+        { name: 'AI original', rec: base },
+        { name: 'Peak safe', rec: tuneAiRecommendation(base, {
+            punchy_bass: -10,
+            super_res: -8,
+            brilliance: -8,
+            stereo: -6,
+            limiter: +14
+        }) },
+        { name: 'Transient safe', rec: tuneAiRecommendation(base, {
+            multiband: +8,
+            punchy_bass: -14,
+            super_res: -6,
+            brilliance: -5,
+            limiter: +16
+        }) },
+        { name: 'Stage safe', rec: tuneAiRecommendation(base, {
+            stereo: v => Math.round(v * 0.72),
+            super_res: -7,
+            brilliance: -6,
+            limiter: +10
+        }) },
+        { name: 'Band separation', rec: tuneAiRecommendation(base, {
+            multiband: +12,
+            punchy_bass: -8,
+            super_res: -6,
+            brilliance: -5,
+            stereo: v => Math.round(v * 0.82),
+            limiter: +10
+        }) },
+        { name: 'Balanced lift', rec: tuneAiRecommendation(base, {
+            multiband: +4,
+            punchy_bass: -5,
+            super_res: -4,
+            brilliance: -4,
+            limiter: +8
+        }) },
+        { name: 'Clip guard', rec: tuneAiRecommendation(base, {
+            multiband: +10,
+            punchy_bass: -20,
+            super_res: -16,
+            brilliance: -16,
+            stereo: v => Math.round(v * 0.58),
+            limiter: +24
+        }) }
+    ];
+}
+
+function createHotSegmentBuffer(buffer, seconds = 18) {
+    const sr = buffer.sampleRate;
+    const segmentLength = Math.min(buffer.length, Math.max(1, Math.floor(sr * seconds)));
+    if (segmentLength >= buffer.length) return cloneAudioBuffer(buffer);
+
+    const step = Math.max(1, Math.floor(sr * 0.5));
+    let bestStart = 0;
+    let bestEnergy = -Infinity;
+
+    for (let start = 0; start + segmentLength <= buffer.length; start += step) {
+        let sum = 0;
+        let count = 0;
+        const scanEnd = Math.min(buffer.length, start + Math.floor(sr * 2));
+        for (let c = 0; c < buffer.numberOfChannels; c++) {
+            const d = buffer.getChannelData(c);
+            for (let i = start; i < scanEnd; i += 16) {
+                sum += d[i] * d[i];
+                count++;
+            }
+        }
+        const energy = sum / Math.max(1, count);
+        if (energy > bestEnergy) {
+            bestEnergy = energy;
+            bestStart = start;
+        }
+    }
+
+    const out = createOfflineContext(buffer.numberOfChannels, segmentLength, sr)
+        .createBuffer(buffer.numberOfChannels, segmentLength, sr);
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+        const src = buffer.getChannelData(c);
+        const dst = out.getChannelData(c);
+        dst.set(src.subarray(bestStart, bestStart + segmentLength));
+    }
+    return out;
+}
+
+function analyzeSimulationBuffer(buffer) {
+    let peak = 0;
+    let sum = 0;
+    let nearClip = 0;
+    let softClipStress = 0;
+    let count = 0;
+    let bassSum = 0;
+    let midSum = 0;
+    let trebleSum = 0;
+
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+        const d = buffer.getChannelData(c);
+        const sr = buffer.sampleRate;
+        const dt = 1 / sr;
+        const rcBass = 1 / (2 * Math.PI * 250);
+        const alphaBass = dt / (rcBass + dt);
+        const rcTreble = 1 / (2 * Math.PI * 4000);
+        const alphaTreble = rcTreble / (rcTreble + dt);
+        let yBassPrev = 0;
+        let yTreblePrev = 0;
+        let xTreblePrev = d[0] || 0;
+
+        for (let i = 0; i < d.length; i++) {
+            const x = d[i];
+            const a = Math.abs(x);
+            if (a > peak) peak = a;
+            if (a > 0.985) nearClip++;
+            if (a > 0.86) softClipStress++;
+            sum += x * x;
+            count++;
+
+            const yBass = alphaBass * x + (1 - alphaBass) * yBassPrev;
+            const yTreble = alphaTreble * (yTreblePrev + x - xTreblePrev);
+            const yMid = x - yBass - yTreble;
+            bassSum += yBass * yBass;
+            midSum += yMid * yMid;
+            trebleSum += yTreble * yTreble;
+            yBassPrev = yBass;
+            yTreblePrev = yTreble;
+            xTreblePrev = x;
+        }
+    }
+
+    const rms = Math.sqrt(sum / Math.max(1, count));
+    const crestDb = ampToDb(peak / (rms + 1e-12));
+    const bandCount = Math.max(1, count);
+    const bassRms = Math.sqrt(bassSum / bandCount) + 1e-12;
+    const midRms = Math.sqrt(midSum / bandCount) + 1e-12;
+    const trebleRms = Math.sqrt(trebleSum / bandCount) + 1e-12;
+    const bandTotal = bassRms + midRms + trebleRms;
+    const bassRatio = bassRms / bandTotal;
+    const midRatio = midRms / bandTotal;
+    const trebleRatio = trebleRms / bandTotal;
+    const maskingPenalty =
+        Math.max(0, bassRatio - 0.42) * 1.4 +
+        Math.max(0, trebleRatio - 0.38) * 1.0 +
+        Math.max(0, 0.24 - midRatio) * 1.6;
+    const balancePenalty =
+        Math.abs(bassRatio - 0.30) * 0.9 +
+        Math.abs(midRatio - 0.42) * 0.7 +
+        Math.abs(trebleRatio - 0.28) * 0.8;
+    const separationScore = Math.max(0, Math.min(100, 100 - (maskingPenalty + balancePenalty) * 100));
+    const stereo = analyzeStereoPreservationProfile(buffer);
+
+    return {
+        peak,
+        peakDb: ampToDb(peak),
+        rmsDb: ampToDb(rms),
+        crestDb,
+        nearClipRatio: nearClip / Math.max(1, count),
+        softClipStressRatio: softClipStress / Math.max(1, count),
+        separationScore,
+        bandRatios: {
+            bass: bassRatio,
+            mid: midRatio,
+            treble: trebleRatio
+        },
+        stereo
+    };
+}
+
+function analyzeStereoPreservationProfile(buffer) {
+    if (!buffer || buffer.numberOfChannels < 2) {
+        return { correlation: 1, sideRatio: 0, monoRisk: 0, stereoScore: 100 };
+    }
+
+    const l = buffer.getChannelData(0);
+    const r = buffer.getChannelData(1);
+    const step = Math.max(1, Math.floor(buffer.sampleRate / 22050));
+    let ll = 0, rr = 0, lr = 0, mid = 0, side = 0, count = 0;
+
+    for (let i = 0; i < l.length; i += step) {
+        const lv = l[i];
+        const rv = r[i];
+        const m = (lv + rv) * 0.5;
+        const s = (lv - rv) * 0.5;
+        ll += lv * lv;
+        rr += rv * rv;
+        lr += lv * rv;
+        mid += m * m;
+        side += s * s;
+        count++;
+    }
+
+    const correlation = lr / (Math.sqrt(ll * rr) + 1e-12);
+    const sideRatio = Math.sqrt(side / Math.max(1, count)) /
+        (Math.sqrt(mid / Math.max(1, count)) + Math.sqrt(side / Math.max(1, count)) + 1e-12);
+    const monoRisk = Math.max(0, -correlation) + Math.max(0, sideRatio - 0.48) * 1.4;
+    const stereoScore = Math.max(0, Math.min(100, 100 - monoRisk * 100));
+
+    return { correlation, sideRatio, monoRisk, stereoScore };
+}
+
+function scoreAiSimulation(candidate, baseRec, stats, truePeakDb, originalStats = null) {
+    const distance =
+        Math.abs(candidate.multiband - baseRec.multiband) +
+        Math.abs(candidate.punchy_bass - baseRec.punchy_bass) +
+        Math.abs(candidate.super_res - baseRec.super_res) +
+        Math.abs(candidate.brilliance - baseRec.brilliance) +
+        Math.abs(candidate.stereo - baseRec.stereo) +
+        Math.abs(candidate.limiter - baseRec.limiter);
+
+    let score = 100;
+    if (truePeakDb > -1.0) score -= (truePeakDb + 1.0) * 60;
+    if (stats.peakDb > -0.8) score -= (stats.peakDb + 0.8) * 45;
+    if (stats.nearClipRatio > 0.0005) score -= Math.min(30, stats.nearClipRatio * 12000);
+    if ((stats.softClipStressRatio ?? 0) > 0.001) score -= Math.min(35, stats.softClipStressRatio * 8000);
+    if (stats.crestDb < 6.5) score -= (6.5 - stats.crestDb) * 5;
+    score += ((stats.separationScore ?? 50) - 50) * 0.36;
+
+    if (stats.stereo) {
+        score += ((stats.stereo.stereoScore ?? 70) - 70) * 0.14;
+        if (stats.stereo.correlation < 0.12) score -= (0.12 - stats.stereo.correlation) * 18;
+        if (stats.stereo.sideRatio > 0.52) score -= (stats.stereo.sideRatio - 0.52) * 26;
+    }
+
+    if (originalStats) {
+        const b = stats.bandRatios || {};
+        const ob = originalStats.bandRatios || {};
+        const bandDrift =
+            Math.abs((b.bass ?? 0) - (ob.bass ?? 0)) +
+            Math.abs((b.mid ?? 0) - (ob.mid ?? 0)) +
+            Math.abs((b.treble ?? 0) - (ob.treble ?? 0));
+        const stereoDrift = stats.stereo && originalStats.stereo
+            ? Math.abs(stats.stereo.sideRatio - originalStats.stereo.sideRatio) +
+              Math.abs(stats.stereo.correlation - originalStats.stereo.correlation) * 0.45
+            : 0;
+        const rmsLift = Math.max(0, (stats.rmsDb ?? -99) - (originalStats.rmsDb ?? -99) - 2.2);
+        score -= bandDrift * 22;
+        score -= stereoDrift * 18;
+        score -= rmsLift * 3.5;
+    }
+
+    score -= distance * 0.18;
+    return score;
+}
+
+const AI_SIM_TRUE_PEAK_LIMIT_DB = -1.0;
+const AI_SIM_SAMPLE_PEAK_LIMIT_DB = -1.0;
+const AI_SIM_NEAR_CLIP_LIMIT = 0.00005;
+const AI_SIM_SOFT_CLIP_STRESS_LIMIT = 0.001;
+
+function getAiSimulationSafety(stats, truePeakDb) {
+    const reasons = [];
+    if (!Number.isFinite(truePeakDb) || truePeakDb > AI_SIM_TRUE_PEAK_LIMIT_DB) {
+        reasons.push(`true peak ${Number.isFinite(truePeakDb) ? truePeakDb.toFixed(2) : 'N/A'} dBTP`);
+    }
+    if (!Number.isFinite(stats?.peakDb) || stats.peakDb > AI_SIM_SAMPLE_PEAK_LIMIT_DB) {
+        reasons.push(`sample peak ${Number.isFinite(stats?.peakDb) ? stats.peakDb.toFixed(2) : 'N/A'} dBFS`);
+    }
+    if ((stats?.nearClipRatio ?? 1) > AI_SIM_NEAR_CLIP_LIMIT) {
+        reasons.push(`near clip ${(stats.nearClipRatio * 100).toFixed(3)}%`);
+    }
+    if ((stats?.softClipStressRatio ?? 1) > AI_SIM_SOFT_CLIP_STRESS_LIMIT) {
+        reasons.push(`soft clip stress ${(stats.softClipStressRatio * 100).toFixed(3)}%`);
+    }
+    return {
+        safe: reasons.length === 0,
+        reasons
+    };
+}
+
+function createEscalatingSafetyCandidate(baseRec, step) {
+    const s = Math.max(1, step);
+    return tuneAiRecommendation(baseRec, {
+        multiband: 8 + s * 4,
+        punchy_bass: -(18 + s * 8),
+        super_res: -(14 + s * 7),
+        brilliance: -(14 + s * 7),
+        stereo: v => Math.round(v * Math.max(0.25, 0.58 - s * 0.08)),
+        limiter: 22 + s * 10
+    });
+}
+
+async function simulateAiRecommendationForSelection() {
+    if (!currentSelectedFileId) {
+        alert('음원을 먼저 선택해주세요.');
+        return;
+    }
+
+    const rec = aiRecommendationMap.get(currentSelectedFileId);
+    if (!rec) {
+        alert('현재 음원의 AI 추천값이 없습니다.');
+        updateAiSimulationButton();
+        return;
+    }
+
+    const currentIdx = resL.findIndex((r, idx) => makeFileId(lastF[idx]) === currentSelectedFileId);
+    if (currentIdx < 0 || !resL[currentIdx]?.origBuffer) {
+        alert('시뮬레이션 소스가 아직 준비되지 않았습니다.');
+        return;
+    }
+
+    const baseRec = cloneAiRecommendation(rec);
+    const candidates = buildAiOptimizationCandidates(baseRec);
+    const chainModules = [...dspChain.querySelectorAll('.toggle-container')].map(el => el.dataset.module);
+    const presetName = document.getElementById('quality-preset')?.value || previewState.presetName;
+    const simulationBuffer = createHotSegmentBuffer(resL[currentIdx].origBuffer, 18);
+    const originalSimulationStats = analyzeSimulationBuffer(simulationBuffer);
+    const originalParams = captureCurrentParameters();
+    let best = null;
+    const rejected = [];
+
+    stopPreview();
+
+    try {
+        for (let i = 0; i < candidates.length; i++) {
+            const item = candidates[i];
+            if (domEl.statusText) domEl.statusText.textContent = `AI 추천값 최적화 시뮬레이션 ${i + 1}/${candidates.length}`;
+
+            fileParameterMap.set(currentSelectedFileId, { ...originalParams, ...convertRecommendationToParameters(item.rec) });
+            loadSavedParameters(currentSelectedFileId);
+
+            const rendered = await runLegacyDSP(simulationBuffer, chainModules, presetName);
+            const stats = analyzeSimulationBuffer(rendered);
+            const tp = await measureTruePeak(rendered);
+            const safety = getAiSimulationSafety(stats, tp.peakDb);
+            const score = scoreAiSimulation(item.rec, baseRec, stats, tp.peakDb, originalSimulationStats);
+            const result = { ...item, stats, truePeakDb: tp.peakDb, score, safety };
+            if (!safety.safe) {
+                rejected.push(result);
+                continue;
+            }
+            if (!best || result.score > best.score) best = result;
+        }
+
+        for (let step = 1; !best && step <= 6; step++) {
+            const safeCandidate = {
+                name: `Safety fallback ${step}`,
+                rec: createEscalatingSafetyCandidate(baseRec, step)
+            };
+            if (domEl.statusText) domEl.statusText.textContent = `클리핑 방지 후보 재시뮬레이션 ${step}/6`;
+
+            fileParameterMap.set(currentSelectedFileId, { ...originalParams, ...convertRecommendationToParameters(safeCandidate.rec) });
+            loadSavedParameters(currentSelectedFileId);
+
+            const rendered = await runLegacyDSP(simulationBuffer, chainModules, presetName);
+            const stats = analyzeSimulationBuffer(rendered);
+            const tp = await measureTruePeak(rendered);
+            const safety = getAiSimulationSafety(stats, tp.peakDb);
+            const score = scoreAiSimulation(safeCandidate.rec, baseRec, stats, tp.peakDb, originalSimulationStats) - step * 1.5;
+            const result = { ...safeCandidate, stats, truePeakDb: tp.peakDb, score, safety };
+
+            if (safety.safe) {
+                best = result;
+                break;
+            }
+            rejected.push(result);
+        }
+
+        if (!best) {
+            const last = rejected[rejected.length - 1];
+            const reason = last?.safety?.reasons?.join(', ') || 'unknown clipping risk';
+            throw new Error(`클리핑 안전 기준을 통과한 추천값을 찾지 못했습니다. 마지막 후보: ${reason}`);
+        }
+
+        aiRecommendationMap.set(currentSelectedFileId, best.rec);
+        aiRecommendationStatusMap.set(currentSelectedFileId, {
+            stage: 'optimized',
+            method: best.name,
+            truePeakDb: best.truePeakDb,
+            peakDb: best.stats.peakDb,
+            crestDb: best.stats.crestDb,
+            separationScore: best.stats.separationScore,
+            stereoScore: best.stats.stereo?.stereoScore,
+            rejectedCount: rejected.length,
+            safety: 'clip-safe'
+        });
+        applyRecommendationToPreviewControls(best.rec, currentSelectedFileId);
+        renderAllAiRecommendations(currentSelectedFileId);
+
+        if (domEl.aiFeedback) {
+            domEl.aiFeedback.textContent =
+                `AI 추천값 최적화 완료: ${best.name}\n` +
+                `클리핑 안전 기준 통과 · 탈락 후보 ${rejected.length}개\n` +
+                `예상 true peak ${best.truePeakDb.toFixed(2)} dBTP, 샘플 피크 ${best.stats.peakDb.toFixed(2)} dBFS, 크레스트 ${best.stats.crestDb.toFixed(1)} dB\n` +
+                `대역 분리도 ${best.stats.separationScore.toFixed(0)}/100 · 스테레오 보존 ${best.stats.stereo.stereoScore.toFixed(0)}/100\n` +
+                `저/중/고 ${Math.round(best.stats.bandRatios.bass * 100)}/${Math.round(best.stats.bandRatios.mid * 100)}/${Math.round(best.stats.bandRatios.treble * 100)} · Side ${(best.stats.stereo.sideRatio * 100).toFixed(0)}%`;
+            domEl.aiFeedback.style.color = 'var(--text)';
+        }
+        if (domEl.statusText) domEl.statusText.textContent = 'AI 추천값 최적화 완료';
+    } catch (err) {
+        fileParameterMap.set(currentSelectedFileId, originalParams);
+        loadSavedParameters(currentSelectedFileId);
+        throw err;
+    }
+}
+
+function makeExportBlobForCurrentBitDepth(buffer) {
+    const bitDepth = document.getElementById('export-bit-depth')?.value || '24';
+    return bitDepth === '16'
+        ? bufferToWave(buffer, buffer.length)
+        : bufferToWave24(buffer, buffer.length);
+}
+
+async function applyStrictFinalSafety(buffer, ceilingDb = -1.5) {
+    const ceiling = Math.pow(10, ceilingDb / 20);
+    let totalGain = 1;
+
+    for (let pass = 0; pass < 5; pass++) {
+        const { peak } = await measureTruePeak(buffer);
+        let samplePeak = 0;
+        for (let c = 0; c < buffer.numberOfChannels; c++) {
+            const d = buffer.getChannelData(c);
+            for (let i = 0; i < d.length; i++) {
+                const a = Math.abs(d[i]);
+                if (a > samplePeak) samplePeak = a;
+            }
+        }
+
+        const requiredGain = Math.min(
+            peak > ceiling ? ceiling / peak : 1,
+            samplePeak > ceiling ? ceiling / samplePeak : 1
+        );
+        if (requiredGain >= 0.999) break;
+
+        totalGain *= requiredGain;
+        for (let c = 0; c < buffer.numberOfChannels; c++) {
+            const d = buffer.getChannelData(c);
+            for (let i = 0; i < d.length; i++) d[i] *= requiredGain;
+        }
+    }
+
+    applySoftClipperToBuffer(buffer, Math.min(0.82, ceiling * 0.98), ceiling);
+    applySafety(buffer);
+    const finalTp = await measureTruePeak(buffer);
+    return { truePeakDb: finalTp.peakDb, gain: totalGain, ceilingDb };
+}
+
+function getSamplePeak(buffer) {
+    let peak = 0;
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+        const d = buffer.getChannelData(c);
+        for (let i = 0; i < d.length; i++) {
+            const a = Math.abs(d[i]);
+            if (a > peak) peak = a;
+        }
+    }
+    return peak;
+}
+
+function applyGainToBuffer(buffer, gain) {
+    if (!Number.isFinite(gain) || gain <= 0 || Math.abs(gain - 1) < 1e-4) return 1;
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+        const d = buffer.getChannelData(c);
+        for (let i = 0; i < d.length; i++) d[i] *= gain;
+    }
+    return gain;
+}
+
+async function matchVolumeToReferenceSafely(buffer, referenceBuffer, ceilingDb = -1.5) {
+    const enabled = document.getElementById('opt-match-volume')?.checked !== false;
+    if (!enabled || !buffer || !referenceBuffer) {
+        const tp = await measureTruePeak(buffer);
+        return { applied: false, gain: 1, limitedByCeiling: false, truePeakDb: tp.peakDb };
+    }
+
+    const refRms = calculateRMS(referenceBuffer);
+    const curRms = calculateRMS(buffer);
+    if (!Number.isFinite(refRms) || !Number.isFinite(curRms) || refRms <= 1e-8 || curRms <= 1e-8) {
+        const tp = await measureTruePeak(buffer);
+        return { applied: false, gain: 1, limitedByCeiling: false, truePeakDb: tp.peakDb };
+    }
+
+    const desiredGain = Math.max(0.25, Math.min(4.0, refRms / curRms));
+    const currentTp = await measureTruePeak(buffer);
+    const samplePeak = getSamplePeak(buffer);
+    const ceiling = Math.pow(10, ceilingDb / 20);
+    const truePeakCap = currentTp.peak > 1e-8 ? ceiling / currentTp.peak : desiredGain;
+    const samplePeakCap = samplePeak > 1e-8 ? ceiling / samplePeak : desiredGain;
+    const safeCap = Math.max(0.05, Math.min(truePeakCap, samplePeakCap));
+    const gain = Math.min(desiredGain, safeCap);
+
+    applyGainToBuffer(buffer, gain);
+    let finalTp = await measureTruePeak(buffer);
+    let finalStats = analyzeSimulationBuffer(buffer);
+    let finalSafety = getAiSimulationSafety(finalStats, finalTp.peakDb);
+    let strict = { gain: 1 };
+    if (!finalSafety.safe) {
+        strict = await applyStrictFinalSafety(buffer, ceilingDb);
+        finalTp = await measureTruePeak(buffer);
+    }
+    return {
+        applied: Math.abs(gain - 1) > 1e-3,
+        gain,
+        desiredGain,
+        limitedByCeiling: gain < desiredGain - 0.01 || strict.gain < 0.999,
+        truePeakDb: finalTp.peakDb
+    };
+}
+
+async function renderAiRecommendationWithPostValidation({
+    fileId,
+    audioBuf,
+    nativeSr,
+    chainModules,
+    presetName,
+    rec,
+    originalParams = {},
+    statusPrefix = '렌더 검증'
+}) {
+    const baseRec = cloneAiRecommendation(rec);
+    const originalStats = analyzeSimulationBuffer(createHotSegmentBuffer(audioBuf, 18));
+    let workingRec = baseRec;
+    let restored = null;
+    let renderStats = null;
+    let renderTp = null;
+    let safety = null;
+    let guardPass = 0;
+    const rejected = [];
+
+    for (let pass = 0; pass <= 6; pass++) {
+        if (domEl.statusText) {
+            domEl.statusText.textContent = pass === 0
+                ? `${statusPrefix}: 전체 렌더 검증`
+                : `${statusPrefix}: 안전 재렌더 ${pass}/6`;
+        }
+
+        fileParameterMap.set(fileId, {
+            ...originalParams,
+            ...convertRecommendationToParameters(workingRec)
+        });
+        if (fileId === currentSelectedFileId) loadSavedParameters(fileId);
+
+        restored = await runLegacyDSP(audioBuf, chainModules, presetName);
+        renderStats = analyzeSimulationBuffer(restored);
+        renderTp = await measureTruePeak(restored);
+        safety = getAiSimulationSafety(renderStats, renderTp.peakDb);
+
+        if (safety.safe) break;
+
+        rejected.push({ rec: workingRec, stats: renderStats, truePeakDb: renderTp.peakDb, safety });
+        guardPass = pass + 1;
+        workingRec = createEscalatingSafetyCandidate(baseRec, guardPass);
+    }
+
+    if (!safety?.safe) {
+        const reason = safety?.reasons?.join(', ') || 'unknown clipping risk';
+        throw new Error(`전체 렌더 안전 검증 실패: ${reason}`);
+    }
+
+    const exportMeta = await encodeMasterToExportBlob(restored, nativeSr);
+    let finalBuffer = exportMeta.exportBuf || restored;
+    let finalStats = analyzeSimulationBuffer(finalBuffer);
+    let finalTp = await measureTruePeak(finalBuffer);
+    let finalSafety = getAiSimulationSafety(finalStats, finalTp.peakDb);
+    let strictSafetyApplied = false;
+    let volumeMatchResult = { applied: false, gain: 1, limitedByCeiling: false, truePeakDb: finalTp.peakDb };
+
+    if (document.getElementById('opt-match-volume')?.checked !== false) {
+        if (domEl.statusText) domEl.statusText.textContent = `${statusPrefix}: 원본 볼륨 매칭`;
+        volumeMatchResult = await matchVolumeToReferenceSafely(finalBuffer, audioBuf, -1.5);
+        exportMeta.blob = makeExportBlobForCurrentBitDepth(finalBuffer);
+        exportMeta.truePeakDb = volumeMatchResult.truePeakDb;
+        exportMeta.tpCeilingDb = -1.5;
+        exportMeta.tpLimited = exportMeta.tpLimited || volumeMatchResult.limitedByCeiling;
+        finalStats = analyzeSimulationBuffer(finalBuffer);
+        finalTp = await measureTruePeak(finalBuffer);
+        finalSafety = getAiSimulationSafety(finalStats, finalTp.peakDb);
+    }
+
+    if (!finalSafety.safe) {
+        if (domEl.statusText) domEl.statusText.textContent = `${statusPrefix}: 최종 세이프티 리미팅`;
+        const strict = await applyStrictFinalSafety(finalBuffer, -1.5);
+        exportMeta.blob = makeExportBlobForCurrentBitDepth(finalBuffer);
+        exportMeta.truePeakDb = strict.truePeakDb;
+        exportMeta.tpCeilingDb = strict.ceilingDb;
+        exportMeta.tpLimited = true;
+        finalStats = analyzeSimulationBuffer(finalBuffer);
+        finalTp = await measureTruePeak(finalBuffer);
+        finalSafety = getAiSimulationSafety(finalStats, finalTp.peakDb);
+        strictSafetyApplied = true;
+    }
+
+    if (!finalSafety.safe) {
+        const reason = finalSafety.reasons.join(', ');
+        throw new Error(`최종 결과 안전 검증 실패: ${reason}`);
+    }
+
+    const changed = guardPass > 0 || strictSafetyApplied || volumeMatchResult.applied;
+    aiRecommendationMap.set(fileId, workingRec);
+    aiRecommendationStatusMap.set(fileId, {
+        stage: 'optimized',
+        method: guardPass > 0
+            ? `Post-render guard ${guardPass}`
+            : (strictSafetyApplied ? 'Final limiter guard' : 'Post-render verified'),
+        truePeakDb: finalTp.peakDb,
+        peakDb: finalStats.peakDb,
+        crestDb: finalStats.crestDb,
+        separationScore: finalStats.separationScore,
+        stereoScore: finalStats.stereo?.stereoScore,
+        volumeMatchGain: volumeMatchResult.gain,
+        volumeMatchLimited: volumeMatchResult.limitedByCeiling,
+        rejectedCount: rejected.length,
+        safety: 'post-render-safe'
+    });
+    exportMeta.exportBuf = finalBuffer;
+
+    fileParameterMap.set(fileId, {
+        ...originalParams,
+        ...convertRecommendationToParameters(workingRec)
+    });
+    if (fileId === currentSelectedFileId) loadSavedParameters(fileId);
+
+    return {
+        rec: workingRec,
+        buffer: finalBuffer,
+        exportMeta,
+        stats: finalStats,
+        truePeakDb: finalTp.peakDb,
+        guardPass,
+        strictSafetyApplied,
+        volumeMatchResult,
+        changed
     };
 }
 
@@ -1773,6 +2571,7 @@ async function applyTruePeakLimiter(buffer, ceilingDb) {
 
 function updateTruePeakDisplay(r) {
     if (!domEl.tpDisplay) return;
+    domEl.tpDisplay.style.color = '';
     if (!r || r.truePeakDb == null || !Number.isFinite(r.truePeakDb)) {
         domEl.tpDisplay.textContent = 'True peak: —';
         return;
@@ -1938,16 +2737,37 @@ function updateSampleRateDisplay(r) {
     domEl.srDisplay.textContent = text;
 }
 
-function formatAiRecParams(rec) {
+function formatAiRecParams(rec, fileId = null) {
     if (!rec) return '분석 대기 중…';
-    return `MB ${rec.multiband} · PB ${rec.punchy_bass} · SR ${rec.super_res} · BR ${rec.brilliance} · ST ${rec.stereo} · LM ${rec.limiter}`;
+    const original = fileId ? aiOriginalRecommendationMap.get(fileId) : null;
+    const status = fileId ? aiRecommendationStatusMap.get(fileId) : null;
+    const fmt = (label, key) => {
+        const current = rec[key];
+        const base = original?.[key];
+        if (status?.stage === 'optimized' && Number.isFinite(base) && base !== current) {
+            return `${label} ${base}→${current}`;
+        }
+        return `${label} ${current}`;
+    };
+    return [
+        fmt('MB', 'multiband'),
+        fmt('PB', 'punchy_bass'),
+        fmt('SR', 'super_res'),
+        fmt('BR', 'brilliance'),
+        fmt('ST', 'stereo'),
+        fmt('LM', 'limiter')
+    ].join(' · ');
 }
 
 function updateAiFeedbackForSelection() {
     if (!domEl.aiFeedback || !currentSelectedFileId) return;
     const advice = aiAdviceMap.get(currentSelectedFileId);
     if (advice) {
-        domEl.aiFeedback.textContent = advice;
+        const status = aiRecommendationStatusMap.get(currentSelectedFileId);
+        const label = status?.stage === 'optimized'
+            ? `적용 대기: 최적화값${status.method ? ' · ' + status.method : ''}`
+            : '적용 대기: AI 초안';
+        domEl.aiFeedback.textContent = `${label}\n${advice}`;
         domEl.aiFeedback.style.color = 'var(--text)';
     }
 }
@@ -1977,7 +2797,8 @@ function renderAllAiRecommendations(activeFileId) {
                 <span class="ai-rec-card-name">${i + 1}. ${file.name}</span>
                 <span class="sr-badge">${srBadge}</span>
             </div>
-            <div class="ai-rec-params">${formatAiRecParams(rec)}</div>
+            ${formatAiRecommendationState(fileId, rec)}
+            <div class="ai-rec-params">${formatAiRecParams(rec, fileId)}</div>
         </div>`;
     }).join('');
 
@@ -1988,6 +2809,7 @@ function renderAllAiRecommendations(activeFileId) {
             if (!Number.isNaN(idx)) showResult(idx);
         });
     });
+    updateAiSimulationButton();
 }
 
 function computeResultMetrics(r) {
@@ -2740,21 +3562,38 @@ async function startPreview() {
     lastNode = outGain;
     previewState.activeNodes.outGain = outGain; 
     
+    // Preview-safe peak monitor and limiter. This keeps AI simulation from
+    // turning transient overs into audible hard clipping before final export.
+    const previewPeakAnalyser = ctx.createAnalyser();
+    previewPeakAnalyser.fftSize = 2048;
+    previewPeakAnalyser.smoothingTimeConstant = 0.15;
+
+    const previewLimiter = ctx.createDynamicsCompressor();
+    previewLimiter.threshold.value = -2.2;
+    previewLimiter.knee.value = 1.5;
+    previewLimiter.ratio.value = 20;
+    previewLimiter.attack.value = 0.0015;
+    previewLimiter.release.value = 0.08;
+
+    const previewCeiling = ctx.createGain();
+    previewCeiling.gain.value = 0.93;
+
+    previewState.activeNodes.previewPeakAnalyser = previewPeakAnalyser;
+    previewState.activeNodes.previewLimiter = previewLimiter;
+    previewState.activeNodes.previewCeiling = previewCeiling;
+
+    lastNode.connect(previewPeakAnalyser);
+    previewPeakAnalyser.connect(previewLimiter);
+    previewLimiter.connect(previewCeiling);
+    lastNode = previewCeiling;
+
     // ---------------- 요구사항 1: 소프트 클리퍼 안전장치 삽입 ----------------
     // 1. WaveShaperNode 생성
     const previewWaveShaperNode = ctx.createWaveShaper();
 
-    // 2. 65536 크기의 Float32Array 배열 생성 및 tanh(쌍곡탄젠트) 수식 매핑
-    const curveSize = 65536;
-    const curve = new Float32Array(curveSize);
-    for (let i = 0; i < curveSize; i++) {
-        // -1.0에서 1.0 사이의 입력 신호 레벨 정규화 맵핑
-        const x = (i * 2) / (curveSize - 1) - 1;
-        // f(x) = tanh(x) 수식을 적용하여 1.0을 절대 넘지 않도록 압착
-        curve[i] = Math.tanh(x); 
-    }
-    previewWaveShaperNode.curve = curve;
-    previewWaveShaperNode.oversample = 'none';
+    // 2. 마지막 방어선으로 낮은 드라이브의 soft clip curve를 사용
+    previewWaveShaperNode.curve = createPreviewSoftLimitCurve();
+    previewWaveShaperNode.oversample = '4x';
 
     // 3. 가비지 컬렉션(메모리 해제) 방지를 위해 상태 객체에 강한 참조 저장
     previewState.activeNodes.waveShaper = previewWaveShaperNode;
@@ -2767,6 +3606,7 @@ async function startPreview() {
     // 실시간 프리뷰 루프 시작
     source.start(0);
     previewState.isPlaying = true;
+    startPreviewPeakMonitor(previewPeakAnalyser);
     
     // 메인 파일 오디오 플레이어는 모두 일시정지하여 소리 겹침 차단
     domEl.oP.pause();
@@ -3077,27 +3917,81 @@ domEl.batchList.addEventListener('click', e => {
 // ─────────────────────────────────────────────
 // WAVESURFER
 // ─────────────────────────────────────────────
+function ensureAudioSource(mediaEl, url) {
+    if (!mediaEl || !url) return;
+    const absoluteUrl = new URL(url, window.location.href).href;
+    if (mediaEl.src !== absoluteUrl) {
+        mediaEl.src = url;
+        mediaEl.load();
+    }
+}
+
+function createAudioFallback(container, mediaEl, url, color) {
+    ensureAudioSource(mediaEl, url);
+    if (container) {
+        container.innerHTML = `
+            <div style="height:72px;display:flex;align-items:center;justify-content:center;border:1px dashed rgba(255,255,255,0.18);border-radius:12px;color:var(--text-muted);font-size:0.78rem;">
+                Audio ready - waveform fallback
+            </div>
+        `;
+    }
+    return {
+        on(eventName, callback) {
+            if (!mediaEl || typeof callback !== 'function') return;
+            if (eventName === 'ready') {
+                if (mediaEl.readyState >= 1) callback();
+                else mediaEl.addEventListener('loadedmetadata', callback, { once: true });
+            }
+            if (eventName === 'timeupdate') {
+                mediaEl.addEventListener('timeupdate', callback);
+            }
+            if (eventName === 'interaction') {
+                mediaEl.addEventListener('seeked', callback);
+            }
+        },
+        destroy() {},
+        getDuration() {
+            return mediaEl && Number.isFinite(mediaEl.duration) ? mediaEl.duration : 0;
+        },
+        getCurrentTime() {
+            return mediaEl && Number.isFinite(mediaEl.currentTime) ? mediaEl.currentTime : 0;
+        },
+    };
+}
+
 function initWaveSurfer(containerId, mediaEl, url, color) {
     const container = document.getElementById(containerId);
     container.innerHTML = '';
-    const ws = WaveSurfer.create({
-        container,
-        url,
-        waveColor: 'rgba(255,255,255,0.1)',
-        progressColor: color,
-        media: mediaEl,
-        height: 80,
-        barWidth: 2,
-        barGap: 3,
-        barRadius: 4,
-        normalize: true,
-        fillParent: true,
-        autoCenter: true,
-        dragToSeek: true,
-        backend: 'MediaElement',
-        mediaControls: false
-    });
-    return ws;
+    ensureAudioSource(mediaEl, url);
+
+    if (typeof WaveSurfer === 'undefined' || !WaveSurfer.create) {
+        console.warn('WaveSurfer is unavailable. Falling back to native audio playback.');
+        return createAudioFallback(container, mediaEl, url, color);
+    }
+
+    try {
+        const ws = WaveSurfer.create({
+            container,
+            url,
+            waveColor: 'rgba(255,255,255,0.1)',
+            progressColor: color,
+            media: mediaEl,
+            height: 80,
+            barWidth: 2,
+            barGap: 3,
+            barRadius: 4,
+            normalize: true,
+            fillParent: true,
+            autoCenter: true,
+            dragToSeek: true,
+            backend: 'MediaElement',
+            mediaControls: false
+        });
+        return ws;
+    } catch (err) {
+        console.warn('WaveSurfer initialization failed. Falling back to native audio playback.', err);
+        return createAudioFallback(container, mediaEl, url, color);
+    }
 }
 
 const formatTime = s => {
@@ -3116,6 +4010,7 @@ async function showResult(idx) {
     // ✅ 추가: 현재 파일 ID 저장
     currentSelectedFileId = makeFileId(lastF[idx]);
     loadSavedParameters(currentSelectedFileId);
+    updateAiSimulationButton();
     console.log('Selected File ID:', currentSelectedFileId);
 
     if (previewState.isPlaying) {
@@ -3125,6 +4020,8 @@ async function showResult(idx) {
     [...domEl.batchList.children].forEach((el, i) => el.classList.toggle('active', i === idx));
 
     domEl.result.style.display = 'block';
+    ensureAudioSource(domEl.oP, r.orig);
+    ensureAudioSource(domEl.rP, r.url);
 
     requestAnimationFrame(async () => {
         if (wsO) { try { wsO.destroy(); } catch(e){} wsO = null; }
@@ -3234,8 +4131,8 @@ async function runAiAnalysisForAllFiles() {
     renderAllAiRecommendations(currentSelectedFileId);
     updateAiFeedbackForSelection();
     if (domEl.applyAiBtn) {
-        domEl.applyAiBtn.textContent = '✨ APPLY SMART TUNING';
         domEl.applyAiBtn.classList.add('ready');
+        updateAiSimulationButton();
     }
     if (domEl.applyAiAllBtn && aiRecommendationMap.size > 0) {
         domEl.applyAiAllBtn.classList.add('ready');
@@ -3319,6 +4216,8 @@ REQUIRED JSON KEYS: "advice", "multiband", "punchy_bass", "super_res", "brillian
 
         if (fileId) {
             aiRecommendationMap.set(fileId, safe);
+            aiOriginalRecommendationMap.set(fileId, cloneAiRecommendation(safe));
+            aiRecommendationStatusMap.set(fileId, { stage: 'draft' });
             if (parsed.advice) aiAdviceMap.set(fileId, parsed.advice);
             console.log('AI Recommendation saved:', fileId, safe);
         }
@@ -3328,8 +4227,8 @@ REQUIRED JSON KEYS: "advice", "multiband", "punchy_bass", "super_res", "brillian
                 fbEl.textContent = parsed.advice || 'AI 음향 분석이 성공적으로 마무리되었습니다.';
                 fbEl.style.color = 'var(--text)';
             }
-            applyBtn.textContent = '✨ APPLY SMART TUNING';
             applyBtn.classList.add('ready');
+            updateAiSimulationButton();
         }
 
         renderAllAiRecommendations(currentSelectedFileId);
@@ -3390,7 +4289,13 @@ document.getElementById('ab-toggle-btn').addEventListener('click', () => {
         rStatus.style.color = isR ? 'var(--accent)' : 'var(--text-muted)';
     }
     
+    const wasPlaying = !domEl.oP.paused || !domEl.rP.paused;
     applyAbPlaybackState(isR);
+    if (wasPlaying) {
+        syncAndPlayAbPair().catch((err) => {
+            console.warn('A/B toggle playback sync failed.', err);
+        });
+    }
 });
 
 // 레인지 노브 변경 리스너 전체 바인딩
@@ -3533,6 +4438,29 @@ document.getElementById('quality-preset').addEventListener('change', e => {
 // MULTI FILE AI APPLY HANDLERS
 // ─────────────────────────────────────────────
 
+if (domEl.simulateAiBtn) {
+    domEl.simulateAiBtn.addEventListener('click', async function(e) {
+        e.preventDefault();
+
+        if (domEl.simulateAiBtn.disabled) return;
+
+        const originalText = domEl.simulateAiBtn.textContent;
+        domEl.simulateAiBtn.textContent = '시뮬레이션 중...';
+        domEl.simulateAiBtn.disabled = true;
+
+        try {
+            await simulateAiRecommendationForSelection();
+        } catch (err) {
+            console.error('AI simulation error:', err);
+            alert('시뮬레이션 오류: ' + (err.message || err));
+        } finally {
+            domEl.simulateAiBtn.textContent = originalText || '추천값 최적화';
+            updateAiSimulationButton();
+        }
+    });
+    updateAiSimulationButton();
+}
+
 if (domEl.applyAiBtn) {
     domEl.applyAiBtn.addEventListener('click', async function(e) {
         e.preventDefault();
@@ -3546,7 +4474,14 @@ if (domEl.applyAiBtn) {
             return alert('AI 추천값이 없습니다.');
         }
 
-        domEl.applyAiBtn.innerText = '🔄 마스터링 중...';
+        const applyStatus = aiRecommendationStatusMap.get(currentSelectedFileId);
+        const applyingOptimized = applyStatus?.stage === 'optimized';
+        if (!applyingOptimized) {
+            const ok = confirm('현재 값은 AI 초안입니다. 최적화 없이 적용하되, 전체 렌더 후 안전 재검증은 수행합니다. 계속할까요?');
+            if (!ok) return;
+        }
+        domEl.applyAiBtn.dataset.busy = '1';
+        domEl.applyAiBtn.innerText = applyingOptimized ? '🔄 최적화값 적용 중...' : '🔄 AI 초안 적용 중...';
         domEl.applyAiBtn.disabled = true;
 
         try {
@@ -3567,15 +4502,18 @@ if (domEl.applyAiBtn) {
             const chainModules = [...dspChain.querySelectorAll('.toggle-container')].map(el => el.dataset.module);
             const presetName = document.getElementById('quality-preset').value;
 
-            // 파라미터 적용 (슬라이더에 반영)
-            const params = convertRecommendationToParameters(rec);
-            fileParameterMap.set(currentSelectedFileId, params);
-            loadSavedParameters(currentSelectedFileId);
-
-            // 새로운 마스터링 실행
-            const restored = await runLegacyDSP(audioBuf, chainModules, presetName);
-            const exportMeta = await encodeMasterToExportBlob(restored, nativeSr);
-            const playbackUrl = createPlaybackUrlFromBuffer(restored);
+            const renderResult = await renderAiRecommendationWithPostValidation({
+                fileId: currentSelectedFileId,
+                audioBuf,
+                nativeSr,
+                chainModules,
+                presetName,
+                rec,
+                originalParams: captureCurrentParameters(),
+                statusPrefix: applyingOptimized ? '최적화값 적용' : 'AI 초안 적용'
+            });
+            const exportMeta = renderResult.exportMeta;
+            const playbackUrl = createPlaybackUrlFromBuffer(renderResult.buffer);
             const exportUrl = createExportDownloadUrl(exportMeta.blob);
 
             revokeResultURLs(resL[currentIdx], true);
@@ -3586,7 +4524,7 @@ if (domEl.applyAiBtn) {
                 exportUrl,
                 blob: exportMeta.blob,
                 orig: resL[currentIdx].orig,
-                buffer: restored,
+                buffer: renderResult.buffer,
                 origBuffer: audioBuf,
                 nativeSampleRate: nativeSr,
                 decodedSampleRate: decodedSr,
@@ -3602,14 +4540,22 @@ if (domEl.applyAiBtn) {
             renderBatchList();
             await showResult(currentIdx);
             
-            alert('✨ AI 추천값 적용 및 마스터링 완료!');
+            const guardMsg = renderResult.changed
+                ? `\n전체 렌더 재검증으로 안전 보정 적용: ${renderResult.guardPass || 'final limiter'}`
+                : '\n전체 렌더 안전 재검증 통과';
+            const volumeMsg = renderResult.volumeMatchResult?.applied
+                ? `\n원본 볼륨 매칭: ${(20 * Math.log10(renderResult.volumeMatchResult.gain)).toFixed(1)} dB${renderResult.volumeMatchResult.limitedByCeiling ? ' (안전 한도 내)' : ''}`
+                : '\n원본 볼륨 매칭: 변경 없음';
+            alert((applyingOptimized
+                ? '✨ 최적화값 적용 및 마스터링 완료!'
+                : '✨ AI 초안 적용 및 마스터링 완료!') + guardMsg + volumeMsg);
             
         } catch (err) {
             alert('처리 중 오류: ' + (err.message || err));
             console.error('Apply AI Error:', err);
         } finally {
-            domEl.applyAiBtn.innerText = '✨ APPLY SMART TUNING';
-            domEl.applyAiBtn.disabled = false;
+            delete domEl.applyAiBtn.dataset.busy;
+            updateAiSimulationButton();
         }
     });
 }
@@ -3622,8 +4568,14 @@ if (domEl.applyAiAllBtn) {
         if (fileIds.length === 0) {
             return alert('적용할 AI 추천값이 없습니다.');
         }
+        const draftCount = fileIds.filter(id => aiRecommendationStatusMap.get(id)?.stage !== 'optimized').length;
+        if (draftCount > 0) {
+            const ok = confirm(`AI 초안 상태의 음원 ${draftCount}개가 포함되어 있습니다. 전체 렌더 후 안전 재검증은 수행하지만, 먼저 추천값 최적화를 돌리는 편이 더 안정적입니다. 계속할까요?`);
+            if (!ok) return;
+        }
 
-        domEl.applyAiAllBtn.innerText = '🔄 전체 일괄 렌더링 중...';
+        domEl.applyAiAllBtn.dataset.busy = '1';
+        domEl.applyAiAllBtn.innerText = '🔄 전체 현재 추천값 적용 중...';
         domEl.applyAiAllBtn.disabled = true;
 
         try {
@@ -3647,13 +4599,19 @@ if (domEl.applyAiAllBtn) {
                 try {
                     const { audioBuf, nativeSr, decodedSr, resampled } = await decodeAudioFile(file, true);
 
-                    const params = convertRecommendationToParameters(rec);
-                    fileParameterMap.set(fileId, params);
-                    loadSavedParameters(fileId);
-
-                    const restored = await runLegacyDSP(audioBuf, chainModules, presetName);
-                    const exportMeta = await encodeMasterToExportBlob(restored, nativeSr);
-                    const playbackUrl = createPlaybackUrlFromBuffer(restored);
+                    const originalParams = fileParameterMap.get(fileId) || {};
+                    const renderResult = await renderAiRecommendationWithPostValidation({
+                        fileId,
+                        audioBuf,
+                        nativeSr,
+                        chainModules,
+                        presetName,
+                        rec,
+                        originalParams,
+                        statusPrefix: `전체 적용 ${idx + 1}/${resL.length}`
+                    });
+                    const exportMeta = renderResult.exportMeta;
+                    const playbackUrl = createPlaybackUrlFromBuffer(renderResult.buffer);
                     const exportUrl = createExportDownloadUrl(exportMeta.blob);
 
                     revokeResultURLs(resL[idx], true);
@@ -3664,7 +4622,7 @@ if (domEl.applyAiAllBtn) {
                         exportUrl,
                         blob: exportMeta.blob,
                         orig: resL[idx].orig,
-                        buffer: restored,
+                        buffer: renderResult.buffer,
                         origBuffer: audioBuf,
                         nativeSampleRate: nativeSr,
                         decodedSampleRate: decodedSr,
@@ -3694,8 +4652,8 @@ if (domEl.applyAiAllBtn) {
             alert('일괄 처리 중 오류: ' + (err.message || err));
             console.error('Apply All Error:', err);
         } finally {
-            domEl.applyAiAllBtn.innerText = '✨ APPLY ALL';
-            domEl.applyAiAllBtn.disabled = false;
+            delete domEl.applyAiAllBtn.dataset.busy;
+            updateAiSimulationButton();
             domEl.statusText.textContent = 'NOVA ENGINE PROCESSING...';
         }
     });
